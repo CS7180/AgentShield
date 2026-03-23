@@ -1,0 +1,42 @@
+syntax = "proto3";
+
+package orchestrator;
+
+option go_package = "github.com/agentshield/api-gateway/proto/orchestrator";
+
+service OrchestratorService {
+  rpc StartScan  (StartScanRequest)  returns (StartScanResponse);
+  rpc StopScan   (StopScanRequest)   returns (StopScanResponse);
+  rpc ScanStatus (ScanStatusRequest) returns (ScanStatusResponse);
+}
+
+message StartScanRequest {
+  string scan_id          = 1;
+  string target_endpoint  = 2;
+  string mode             = 3;
+  repeated string attack_types = 4;
+}
+
+message StartScanResponse {
+  bool   accepted = 1;
+  string message  = 2;
+}
+
+message StopScanRequest {
+  string scan_id = 1;
+}
+
+message StopScanResponse {
+  bool   stopped  = 1;
+  string message  = 2;
+}
+
+message ScanStatusRequest {
+  string scan_id = 1;
+}
+
+message ScanStatusResponse {
+  string scan_id  = 1;
+  string status   = 2;
+  int32  progress = 3;
+}

@@ -1,0 +1,36 @@
+# Binaries
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Build output
+api-gateway
+
+# Go test artifacts
+*.test
+*.out
+coverage.html
+coverage.txt
+
+# Go workspace
+go.work
+go.work.sum
+
+# Environment / secrets
+.env
+*.env.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*.DS_Store
+
+# Proto generated (regenerate with make proto)
+# Uncomment if you want to exclude generated pb.go from version control:
+# proto/**/*.pb.go
+# proto/**/*_grpc.pb.go
