@@ -1,8 +1,18 @@
-# CLAUDE.md — AgentShield Engineering Guide
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+---
+
+## AgentShield Engineering Guide
 
 This file is the authoritative operating guide for Claude Code working in this repository.
 Full product requirements: @project_memory/AgentShield_PRD.md
-React UI mockups (dark-themed, purple accent): `project_memory/AgentShield_*.jsx`
+React UI mockups (dark-themed, purple accent):
+- `project_memory/AgentShield_Dashboard_Final.jsx`
+- `project_memory/AgentShield_NewScan.jsx`
+- `project_memory/AgentShield_ScanMonitor.jsx`
+- `project_memory/AgentShield_Report.jsx`
 
 ---
 
@@ -289,6 +299,15 @@ npm test -- --coverage
 
 5. **Commit** — see conventions below.
 
+> **First-time setup** (api-gateway):
+> ```bash
+> cd api-gateway
+> cp .env.example .env          # fill in SUPABASE_JWT_SECRET + DATABASE_URL
+> go mod tidy                   # generates go.sum (requires Go 1.22+)
+> docker compose up -d redis kafka
+> go run ./cmd/server
+> ```
+
 ---
 
 ## 12. Commit Message Conventions
@@ -332,48 +351,30 @@ TDD commits typically appear in sequence: `test(...)` → `feat(...)` → `refac
 
 ---
 
-## 14. Allowed Commands & Permissions
+## 14. Permissions & Allowlists
 
-The following commands are safe to run without asking:
+Claude Code uses a two-layer permission system for this project:
 
-```bash
-# Go
-go build ./...
-go test ./...
-go mod tidy
-gofmt -w .
-goimports -w .
-make build | make test | make proto | make lint
+**Layer 1 — Machine-enforced allowlist** (`.claude/settings.json`):
+Auto-approves the listed `Bash(...)` patterns without prompting. Covers all safe read/build/test/lint/format commands for Go, Python, React, Docker (local infra only), and git read operations. This file is committed to the repo so the allowlist is consistent for all contributors.
 
-# Python
-ruff check .
-black .
-pytest
-pip install -r requirements.txt
+**Layer 2 — Policy rules below** (enforced by judgment):
 
-# React
-npm install
-npm run lint
-npm test
-npm run build
+Auto-approved (covered by `.claude/settings.json`):
+- All `go build`, `go test`, `go mod tidy`, `gofmt`, `go vet`, `go env`
+- All `make` targets: `build`, `test`, `lint`, `proto`, `tidy`, `docker-up`, `docker-down`
+- `docker compose up -d redis kafka zookeeper` and `docker compose down` / `build` / `ps` / `logs`
+- All `pytest`, `ruff`, `black`, `pip install -r requirements.txt`
+- All `npm install`, `npm run lint`, `npm test`, `npm run build`
+- `git status`, `git diff`, `git log`, `git add`, `git commit`, `git branch`, `git checkout`, `git stash`
 
-# Docker (local dev only)
-docker compose up -d redis kafka zookeeper
-docker compose down
-docker compose build api-gateway
-
-# Git (read-only)
-git status
-git diff
-git log
-```
-
-**Always ask before:**
-- `git push`, `git push --force`
-- `docker compose up` with the full stack including `api-gateway` (touches live DB)
-- Any `kubectl apply` or `terraform apply`
-- Any `DROP TABLE`, `DELETE FROM`, or destructive migration
-- Installing new Go or Python packages (evaluate necessity first)
+**Always ask before running:**
+- `git push` or `git push --force` (any remote write)
+- `docker compose up` with `api-gateway` service (connects to live Supabase DB)
+- Any `kubectl apply`, `helm upgrade`, or `terraform apply`
+- Any SQL with `DROP`, `DELETE`, `TRUNCATE`, or `ALTER TABLE ... DROP COLUMN`
+- `go get <new-package>` or `pip install <new-package>` not already in `go.mod` / `requirements.txt`
+- Any command that writes to `.env` or touches secret values
 
 ---
 
