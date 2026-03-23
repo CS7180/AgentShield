@@ -156,7 +156,7 @@ func (h *ScanHandler) Start(c *gin.Context) {
 		return
 	}
 
-	if scan.Status != domain.StatusPending && scan.Status != domain.StatusQueued {
+	if !domain.CanTransition(scan.Status, domain.StatusRunning) {
 		abortBadRequest(c, "scan is not in a startable state", "INVALID_SCAN_STATE")
 		return
 	}
@@ -205,7 +205,7 @@ func (h *ScanHandler) Stop(c *gin.Context) {
 		return
 	}
 
-	if scan.Status != domain.StatusRunning && scan.Status != domain.StatusQueued {
+	if !domain.CanTransition(scan.Status, domain.StatusStopped) {
 		abortBadRequest(c, "scan is not running", "INVALID_SCAN_STATE")
 		return
 	}
