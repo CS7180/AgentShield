@@ -19,11 +19,11 @@ func Recovery(logger *zap.Logger) gin.HandlerFunc {
 					zap.String("path", c.FullPath()),
 				)
 				c.JSON(http.StatusInternalServerError, gin.H{
-					"error":      "internal server error",
-					"code":       "INTERNAL_ERROR",
+					"error":       "internal server error",
+					"code":        "INTERNAL_ERROR",
 					"status_code": http.StatusInternalServerError,
-					"timestamp":  time.Now().UTC(),
-					"request_id": rid,
+					"timestamp":   time.Now().UTC(),
+					"request_id":  rid,
 				})
 				c.Abort()
 			}

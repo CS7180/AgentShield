@@ -138,7 +138,7 @@ func run() error {
 
 	// Authenticated API routes
 	scanHandler := handler.NewScanHandler(scanRepo, orchClient, logger)
-	reportHandler := handler.NewReportHandler()
+	reportHandler := handler.NewReportHandler(scanRepo, logger)
 	judgeHandler := handler.NewJudgeHandler()
 
 	globalRateLimit := middleware.GlobalRateLimit(redisClient)
