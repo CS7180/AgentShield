@@ -42,13 +42,6 @@ export function AuthProvider({ children }) {
     user: session?.user ?? null,
     loading,
     isConfigured: isSupabaseConfigured,
-    async signInWithPassword({ email, password }) {
-      if (!supabase) {
-        return { error: new Error('Supabase is not configured yet.') };
-      }
-
-      return supabase.auth.signInWithPassword({ email, password });
-    },
     async signInWithGoogle({ redirectTo }) {
       if (!supabase) {
         return { error: new Error('Supabase is not configured yet.') };
