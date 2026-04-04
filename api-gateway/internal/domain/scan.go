@@ -19,8 +19,8 @@ const (
 )
 
 const (
-	ModeRedTeam    ScanMode = "red_team"
-	ModeBlueTeam   ScanMode = "blue_team"
+	ModeRedTeam     ScanMode = "red_team"
+	ModeBlueTeam    ScanMode = "blue_team"
 	ModeAdversarial ScanMode = "adversarial"
 )
 

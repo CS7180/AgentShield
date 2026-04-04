@@ -16,12 +16,12 @@ type Message struct {
 // rooms maps scan_id → set of clients.
 // Hub.Run() is the sole goroutine that writes to the rooms map.
 type Hub struct {
-	rooms     map[string]map[*Client]struct{}
-	broadcast chan Message
-	register  chan *Client
+	rooms      map[string]map[*Client]struct{}
+	broadcast  chan Message
+	register   chan *Client
 	unregister chan *Client
-	mu        sync.RWMutex
-	logger    *zap.Logger
+	mu         sync.RWMutex
+	logger     *zap.Logger
 }
 
 func NewHub(logger *zap.Logger) *Hub {

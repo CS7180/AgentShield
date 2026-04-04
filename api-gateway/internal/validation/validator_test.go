@@ -3,8 +3,8 @@ package validation_test
 import (
 	"testing"
 
-	"github.com/agentshield/api-gateway/internal/validation"
 	"github.com/agentshield/api-gateway/internal/domain"
+	"github.com/agentshield/api-gateway/internal/validation"
 )
 
 type endpointCase struct {
