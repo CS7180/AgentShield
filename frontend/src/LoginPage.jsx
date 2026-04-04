@@ -1,23 +1,17 @@
-import { useState } from 'react';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { useLocation, Link } from 'react-router-dom';
 import useAuth from './auth/useAuth';
+import { useState } from 'react';
 
 export default function LoginPage() {
-  const navigate = useNavigate();
   const location = useLocation();
-  const { signInWithGoogle, signInWithPassword, isConfigured, loading } = useAuth();
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  const { signInWithGoogle, isConfigured, loading } = useAuth();
   const [submitting, setSubmitting] = useState(false);
-  const [googleSubmitting, setGoogleSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
 
   const from = location.state?.from?.pathname || '/dashboard';
   const reason = location.state?.reason;
 
-  async function handleSubmit(event) {
-    event.preventDefault();
-
+  async function handleGoogleSignIn() {
     if (!isConfigured) {
       setErrorMessage('Supabase credentials are not configured yet.');
       return;
@@ -26,32 +20,12 @@ export default function LoginPage() {
     setSubmitting(true);
     setErrorMessage('');
 
-    const { error } = await signInWithPassword({ email, password });
-
-    if (error) {
-      setErrorMessage(error.message);
-      setSubmitting(false);
-      return;
-    }
-
-    navigate(from, { replace: true });
-  }
-
-  async function handleGoogleSignIn() {
-    if (!isConfigured) {
-      setErrorMessage('Supabase credentials are not configured yet.');
-      return;
-    }
-
-    setGoogleSubmitting(true);
-    setErrorMessage('');
-
     const redirectTo = `${window.location.origin}${from}`;
     const { error } = await signInWithGoogle({ redirectTo });
 
     if (error) {
       setErrorMessage(error.message);
-      setGoogleSubmitting(false);
+      setSubmitting(false);
     }
   }
 
@@ -59,7 +33,7 @@ export default function LoginPage() {
     ? 'Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in frontend/.env.local before testing login.'
     : reason === 'unauthorized'
       ? 'Sign in to continue to the protected application area.'
-      : 'Use your Supabase email/password or Google account to access the dashboard.';
+      : 'Sign in with your Google account to access the dashboard.';
 
   return (
     <div
@@ -133,109 +107,42 @@ export default function LoginPage() {
             </div>
           )}
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 20 }}>
-            <button
-              type="button"
-              onClick={handleGoogleSignIn}
-              disabled={googleSubmitting || loading || !isConfigured}
+          {errorMessage && (
+            <div
               style={{
-                height: 48,
+                marginBottom: 16,
                 borderRadius: 12,
-                border: '1px solid rgba(255,255,255,0.12)',
-                background: 'rgba(255,255,255,0.04)',
-                color: '#fff',
-                fontSize: 14,
-                fontWeight: 700,
-                cursor: googleSubmitting || loading || !isConfigured ? 'not-allowed' : 'pointer',
-                opacity: googleSubmitting || loading || !isConfigured ? 0.65 : 1,
+                background: 'rgba(244,63,94,0.08)',
+                border: '1px solid rgba(251,113,133,0.16)',
+                color: '#fda4af',
+                padding: '12px 14px',
+                fontSize: 13,
+                lineHeight: 1.5,
               }}
             >
-              {googleSubmitting ? 'Redirecting to Google...' : 'Continue with Google'}
-            </button>
-
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <div style={{ flex: 1, height: 1, background: 'rgba(255,255,255,0.08)' }} />
-              <span style={{ fontSize: 11, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.18em' }}>
-                or
-              </span>
-              <div style={{ flex: 1, height: 1, background: 'rgba(255,255,255,0.08)' }} />
+              {errorMessage}
             </div>
-          </div>
+          )}
 
-          <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            <label style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <span style={{ fontSize: 12, color: '#9ca3af' }}>Email</span>
-              <input
-                type="email"
-                value={email}
-                onChange={(event) => setEmail(event.target.value)}
-                placeholder="name@company.com"
-                autoComplete="email"
-                style={{
-                  height: 46,
-                  borderRadius: 12,
-                  border: '1px solid rgba(255,255,255,0.08)',
-                  background: 'rgba(255,255,255,0.03)',
-                  color: '#fff',
-                  padding: '0 14px',
-                }}
-              />
-            </label>
-
-            <label style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <span style={{ fontSize: 12, color: '#9ca3af' }}>Password</span>
-              <input
-                type="password"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                placeholder="Your Supabase password"
-                autoComplete="current-password"
-                style={{
-                  height: 46,
-                  borderRadius: 12,
-                  border: '1px solid rgba(255,255,255,0.08)',
-                  background: 'rgba(255,255,255,0.03)',
-                  color: '#fff',
-                  padding: '0 14px',
-                }}
-              />
-            </label>
-
-            {errorMessage && (
-              <div
-                style={{
-                  borderRadius: 12,
-                  background: 'rgba(244,63,94,0.08)',
-                  border: '1px solid rgba(251,113,133,0.16)',
-                  color: '#fda4af',
-                  padding: '12px 14px',
-                  fontSize: 13,
-                  lineHeight: 1.5,
-                }}
-              >
-                {errorMessage}
-              </div>
-            )}
-
-            <button
-              type="submit"
-              disabled={submitting || loading || !isConfigured}
-              style={{
-                marginTop: 6,
-                height: 48,
-                borderRadius: 12,
-                border: '1px solid rgba(217,70,239,0.35)',
-                background: 'linear-gradient(135deg, rgba(217,70,239,0.25), rgba(139,92,246,0.15))',
-                color: '#f3e8ff',
-                fontSize: 14,
-                fontWeight: 700,
-                cursor: submitting || loading || !isConfigured ? 'not-allowed' : 'pointer',
-                opacity: submitting || loading || !isConfigured ? 0.65 : 1,
-              }}
-            >
-              {submitting ? 'Signing in...' : 'Sign in with email'}
-            </button>
-          </form>
+          <button
+            type="button"
+            onClick={handleGoogleSignIn}
+            disabled={submitting || loading || !isConfigured}
+            style={{
+              width: '100%',
+              height: 48,
+              borderRadius: 12,
+              border: '1px solid rgba(255,255,255,0.12)',
+              background: 'rgba(255,255,255,0.04)',
+              color: '#fff',
+              fontSize: 14,
+              fontWeight: 700,
+              cursor: submitting || loading || !isConfigured ? 'not-allowed' : 'pointer',
+              opacity: submitting || loading || !isConfigured ? 0.65 : 1,
+            }}
+          >
+            {submitting ? 'Redirecting to Google...' : 'Continue with Google'}
+          </button>
         </div>
       </div>
     </div>
