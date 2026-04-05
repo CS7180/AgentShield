@@ -17,6 +17,7 @@ import (
 	"github.com/agentshield/api-gateway/internal/orchestrator"
 	pgrepo "github.com/agentshield/api-gateway/internal/repository/postgres"
 	redisrepo "github.com/agentshield/api-gateway/internal/repository/redis"
+	"github.com/agentshield/api-gateway/internal/storage"
 	"github.com/agentshield/api-gateway/internal/ws"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -74,7 +75,16 @@ func run() error {
 
 	// ── Repositories ────────────────────────────────────────────────────────────
 	scanRepo := pgrepo.NewScanRepository(pool)
+	reportRepo := pgrepo.NewReportRepository(pool)
 	ownershipAdapter := pgrepo.NewOwnershipAdapter(scanRepo)
+
+	// ── Storage ─────────────────────────────────────────────────────────────────
+	var reportUploader storage.Uploader
+	if cfg.Supabase.URL != "" && cfg.Supabase.ServiceRoleKey != "" {
+		reportUploader = storage.NewSupabaseUploader(cfg.Supabase.URL, cfg.Supabase.ServiceRoleKey)
+	} else {
+		logger.Warn("supabase storage uploader disabled; report upsert endpoint will return NOT_IMPLEMENTED")
+	}
 
 	// ── Orchestrator ─────────────────────────────────────────────────────────────
 	var orchClient handler.OrchestratorClient
@@ -138,7 +148,7 @@ func run() error {
 
 	// Authenticated API routes
 	scanHandler := handler.NewScanHandler(scanRepo, orchClient, logger)
-	reportHandler := handler.NewReportHandler(scanRepo, logger)
+	reportHandler := handler.NewReportHandler(reportRepo, reportUploader, cfg.Supabase.ReportsBucket, logger)
 	judgeHandler := handler.NewJudgeHandler()
 
 	globalRateLimit := middleware.GlobalRateLimit(redisClient)
@@ -155,6 +165,7 @@ func run() error {
 			scans.GET("/:id", ownership, scanHandler.Get)
 			scans.POST("/:id/start", ownership, scanHandler.Start)
 			scans.POST("/:id/stop", ownership, scanHandler.Stop)
+			scans.PUT("/:id/report", ownership, reportHandler.Upsert)
 			scans.GET("/:id/report", ownership, reportHandler.GetJSON)
 			scans.GET("/:id/report/pdf", ownership, reportHandler.GetPDF)
 			scans.GET("/:id/compare/:other_id", ownership, reportHandler.Compare)
