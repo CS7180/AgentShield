@@ -33,6 +33,12 @@ out/
 # Go binaries
 api-gateway/bin/
 api-gateway/api-gateway
+orchestrator/bin/
+orchestrator/orchestrator
+agents/bin/
+agents/agents
+judge/bin/
+judge/judge
 
 # Terraform
 **/.terraform/

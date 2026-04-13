@@ -3,6 +3,7 @@ import Layout from './Layout';
 import DashboardContent from './DashboardContent';
 import NewScanContent from './NewScanContent';
 import ScanMonitorContent from './ScanMonitorContent';
+import ReportCompareContent from './ReportCompareContent';
 import LandingPage from './LandingPage';
 import LoginPage from './LoginPage';
 import ProtectedRoute from './auth/ProtectedRoute';
@@ -84,15 +85,12 @@ function App() {
         <Route element={<AppShell />}>
           <Route path="/dashboard" element={<DashboardContent />} />
           <Route path="/scans" element={<NewScanContent />} />
-          <Route path="/reports" element={<ScanMonitorContent />} />
+          <Route path="/reports" element={<ReportCompareContent />} />
           <Route
             path="/judge"
             element={<ComingSoonContent title="Judge" description="Calibration and judge quality views will live here." />}
           />
-          <Route
-            path="/monitoring"
-            element={<ComingSoonContent title="Monitoring" description="System health and runtime observability will live here." />}
-          />
+          <Route path="/monitoring" element={<ScanMonitorContent />} />
           <Route
             path="/settings"
             element={<ComingSoonContent title="Settings" description="Workspace and integration settings will live here." />}

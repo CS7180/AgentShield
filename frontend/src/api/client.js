@@ -61,3 +61,10 @@ export function getScanReport(id, accessToken) {
     headers: authHeaders(accessToken),
   });
 }
+
+export function compareScans(baseScanID, otherScanID, accessToken) {
+  return request(`/api/v1/scans/${baseScanID}/compare/${otherScanID}`, {
+    method: 'GET',
+    headers: authHeaders(accessToken),
+  });
+}

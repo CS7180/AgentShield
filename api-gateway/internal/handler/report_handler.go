@@ -31,6 +31,34 @@ type ReportHandler struct {
 	logger       *zap.Logger
 }
 
+type severityCounts struct {
+	Critical int `json:"critical"`
+	High     int `json:"high"`
+	Medium   int `json:"medium"`
+	Low      int `json:"low"`
+}
+
+type scoreComparison struct {
+	Base  *float64 `json:"base,omitempty"`
+	Other *float64 `json:"other,omitempty"`
+	Delta *float64 `json:"delta,omitempty"`
+	Trend string   `json:"trend"`
+}
+
+type countComparison struct {
+	Base  severityCounts `json:"base"`
+	Other severityCounts `json:"other"`
+	Delta severityCounts `json:"delta"`
+}
+
+type compareResponse struct {
+	BaseScanID     uuid.UUID       `json:"base_scan_id"`
+	OtherScanID    uuid.UUID       `json:"other_scan_id"`
+	OverallScore   scoreComparison `json:"overall_score"`
+	SeverityCounts countComparison `json:"severity_counts"`
+	GeneratedAt    time.Time       `json:"generated_at"`
+}
+
 type upsertReportRequest struct {
 	OverallScore   *float64        `json:"overall_score"`
 	CriticalCount  int             `json:"critical_count"`
@@ -232,12 +260,116 @@ func (h *ReportHandler) GetPDF(c *gin.Context) {
 }
 
 func (h *ReportHandler) Compare(c *gin.Context) {
-	rid := c.GetString(middleware.RequestIDKey)
-	c.JSON(http.StatusNotImplemented, gin.H{
-		"error":       "scan comparison not yet implemented",
-		"code":        "NOT_IMPLEMENTED",
-		"status_code": http.StatusNotImplemented,
-		"timestamp":   time.Now().UTC(),
-		"request_id":  rid,
+	baseScanID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		abortBadRequest(c, "invalid scan id", "INVALID_SCAN_ID")
+		return
+	}
+
+	otherScanID, err := uuid.Parse(c.Param("other_id"))
+	if err != nil {
+		abortBadRequest(c, "invalid compare scan id", "INVALID_SCAN_ID")
+		return
+	}
+
+	userIDStr := c.GetString(middleware.UserIDKey)
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		abortBadRequest(c, "invalid user id", "INVALID_USER")
+		return
+	}
+
+	baseReport, err := h.repo.GetByScanID(c.Request.Context(), baseScanID)
+	if err != nil {
+		if errors.Is(err, postgres.ErrNotFound) {
+			abortNotFound(c, "base report not found")
+			return
+		}
+		h.logger.Error("get base report", zap.Error(err), zap.String("scan_id", baseScanID.String()))
+		abortInternal(c, "failed to get base report")
+		return
+	}
+
+	otherReport, err := h.repo.GetByScanID(c.Request.Context(), otherScanID)
+	if err != nil {
+		if errors.Is(err, postgres.ErrNotFound) {
+			abortNotFound(c, "comparison report not found")
+			return
+		}
+		h.logger.Error("get comparison report", zap.Error(err), zap.String("scan_id", otherScanID.String()))
+		abortInternal(c, "failed to get comparison report")
+		return
+	}
+
+	if baseReport.UserID != userID || otherReport.UserID != userID {
+		rid := c.GetString(middleware.RequestIDKey)
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+			"error":       "access denied",
+			"code":        "FORBIDDEN",
+			"status_code": http.StatusForbidden,
+			"timestamp":   time.Now().UTC(),
+			"request_id":  rid,
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, compareResponse{
+		BaseScanID:     baseScanID,
+		OtherScanID:    otherScanID,
+		OverallScore:   compareScores(baseReport.OverallScore, otherReport.OverallScore),
+		SeverityCounts: compareSeverityCounts(baseReport, otherReport),
+		GeneratedAt:    time.Now().UTC(),
 	})
+}
+
+func compareScores(base, other *float64) scoreComparison {
+	result := scoreComparison{
+		Base:  base,
+		Other: other,
+		Trend: "unknown",
+	}
+
+	if base == nil || other == nil {
+		return result
+	}
+
+	delta := *other - *base
+	result.Delta = &delta
+
+	switch {
+	case delta > 0:
+		result.Trend = "improved"
+	case delta < 0:
+		result.Trend = "regressed"
+	default:
+		result.Trend = "unchanged"
+	}
+
+	return result
+}
+
+func compareSeverityCounts(base, other *domain.Report) countComparison {
+	baseCounts := severityCounts{
+		Critical: base.CriticalCount,
+		High:     base.HighCount,
+		Medium:   base.MediumCount,
+		Low:      base.LowCount,
+	}
+	otherCounts := severityCounts{
+		Critical: other.CriticalCount,
+		High:     other.HighCount,
+		Medium:   other.MediumCount,
+		Low:      other.LowCount,
+	}
+
+	return countComparison{
+		Base:  baseCounts,
+		Other: otherCounts,
+		Delta: severityCounts{
+			Critical: otherCounts.Critical - baseCounts.Critical,
+			High:     otherCounts.High - baseCounts.High,
+			Medium:   otherCounts.Medium - baseCounts.Medium,
+			Low:      otherCounts.Low - baseCounts.Low,
+		},
+	}
 }

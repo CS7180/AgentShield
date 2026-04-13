@@ -1,9 +1,46 @@
-version: "3.9"
-
-# Local dev stack: Redis + Kafka (DB = Supabase cloud).
+# Local dev stack: agents + judge + orchestrator + API gateway + Redis + Kafka (DB = Supabase cloud).
 # Copy .env.example → .env and fill in SUPABASE_JWT_SECRET + DATABASE_URL before running.
 
 services:
+  agents:
+    build:
+      context: ..
+      dockerfile: agents/Dockerfile
+    environment:
+      AGENTS_PORT: 8090
+    ports:
+      - "8090:8090"
+    restart: unless-stopped
+
+  judge:
+    build:
+      context: ..
+      dockerfile: judge/Dockerfile
+    environment:
+      JUDGE_PORT: 8091
+    ports:
+      - "8091:8091"
+    restart: unless-stopped
+
+  orchestrator:
+    build:
+      context: ..
+      dockerfile: orchestrator/Dockerfile
+    env_file: .env
+    depends_on:
+      agents:
+        condition: service_started
+      judge:
+        condition: service_started
+    environment:
+      ORCHESTRATOR_PORT: 50051
+      ENVIRONMENT: development
+      AGENTS_SERVICE_URL: http://agents:8090
+      JUDGE_SERVICE_URL: http://judge:8091
+    ports:
+      - "50051:50051"
+    restart: unless-stopped
+
   redis:
     image: redis:7-alpine
     ports:
@@ -49,11 +86,16 @@ services:
   api-gateway:
     build: .
     depends_on:
+      orchestrator:
+        condition: service_started
       redis:
         condition: service_healthy
       kafka:
         condition: service_healthy
     env_file: .env
+    environment:
+      ORCHESTRATOR_ENABLED: "true"
+      ORCHESTRATOR_ADDR: orchestrator:50051
     ports:
       - "8080:8080"
     restart: unless-stopped

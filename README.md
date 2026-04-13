@@ -2,7 +2,7 @@
 
 AgentShield is a multi-agent red-blue teaming platform for discovering security vulnerabilities in LLM-powered applications before deployment.
 
-This repository currently contains the Go API gateway and product reference artifacts. The broader platform described in the PRD includes a Go orchestrator, Python-based red and blue team agents, an LLM-as-Judge service, a report generator, and a React dashboard.
+This repository currently contains the Go API gateway, standalone orchestrator/agents/judge services, the React dashboard client, and product reference artifacts.
 
 ## Product Vision
 
@@ -46,8 +46,10 @@ PostgreSQL + Redis
 The current repository state is earlier than that full target architecture:
 
 - `api-gateway/` is present and functional as the current service entry point
+- `frontend/` is present as the React dashboard client
 - `project_memory/` contains the PRD and UI references
-- `orchestrator/`, `agents/`, `judge/`, and `frontend/` are planned but not yet present in this repo
+- `orchestrator/` is present as a standalone gRPC service used by the gateway
+- `agents/` and `judge/` are present as standalone HTTP services for execution/evaluation
 
 ## Current Implementation Status
 
@@ -61,14 +63,23 @@ The Go API gateway already includes:
 - WebSocket status streaming
 - PostgreSQL persistence and startup migrations
 - Prometheus health and metrics endpoints
+- gRPC orchestration integration to standalone orchestrator service
 
-The following features are scaffolded but not implemented yet:
+The following API capabilities are implemented in the gateway:
 
-- judge calibration endpoints
-- report JSON generation
-- PDF report generation
-- scan comparison
-- production orchestrator integration beyond the current stub mode
+- judge calibration calculation endpoint (`POST /api/v1/judge/calibrate`) and latest calibration report retrieval (`GET /api/v1/judge/calibration-report`) with PostgreSQL persistence
+- attack result ingestion/list endpoints for each scan
+- report JSON upsert/retrieval, report generation from attack results, and PDF artifact path retrieval
+- scan report comparison (`GET /api/v1/scans/:id/compare/:other_id`)
+- frontend report comparison route wired to compare API (`/reports`)
+- repository CI workflow for api-gateway/orchestrator/agents/judge tests and frontend build
+- baseline api-gateway coverage gate (`make coverage-check`, default threshold: 25%)
+
+The following platform capabilities are still pending:
+
+- production-grade Python/CrewAI agent implementations (current agents service is deterministic simulator)
+- richer LLM-as-Judge model calibration/evaluation workflows (current judge service is rule-based simulator)
+- async queue workers and deployment automation for multi-service production rollout
 
 When `ORCHESTRATOR_ENABLED=false`, the gateway uses a stub orchestrator and newly started scans are queued instead of being executed end-to-end.
 
@@ -77,6 +88,10 @@ When `ORCHESTRATOR_ENABLED=false`, the gateway uses a stub orchestrator and newl
 ```text
 AgentShield/
 ├── api-gateway/      Go API gateway
+├── orchestrator/     Go gRPC orchestrator service
+├── agents/           Attack execution service
+├── judge/            Evaluation service
+├── frontend/         React dashboard
 ├── project_memory/   PRD and UI mockups
 ├── CLAUDE.md         repository engineering guide
 └── README.md
@@ -115,21 +130,39 @@ Required settings:
 Optional settings:
 
 - `ORCHESTRATOR_ENABLED=false` keeps the gateway in stub mode for local development
+- set `ORCHESTRATOR_ENABLED=true` and `ORCHESTRATOR_ADDR=orchestrator:50051` to use the standalone orchestrator service
 - `ALLOWED_ORIGINS=http://localhost:3000` controls CORS
 
 ### Run Locally
 
-Start Redis and Kafka:
+Start local services (agents, judge, orchestrator, Redis, Kafka):
 
 ```bash
 cd api-gateway
-make docker-up
+make docker-full
 ```
 
 Run the gateway:
 
 ```bash
 cd api-gateway
+make run
+```
+
+Run services manually in separate terminals (optional alternative to `make docker-full`):
+
+```bash
+cd orchestrator
+make run
+```
+
+```bash
+cd agents
+make run
+```
+
+```bash
+cd judge
 make run
 ```
 
@@ -154,10 +187,15 @@ Current gateway endpoints:
 - `GET /api/v1/scans/:id`
 - `POST /api/v1/scans/:id/start`
 - `POST /api/v1/scans/:id/stop`
+- `POST /api/v1/scans/:id/attack-results`
+- `GET /api/v1/scans/:id/attack-results`
+- `PUT /api/v1/scans/:id/report`
 - `GET /api/v1/scans/:id/report`
 - `GET /api/v1/scans/:id/report/pdf`
+- `POST /api/v1/scans/:id/report/generate`
 - `GET /api/v1/scans/:id/compare/:other_id`
 - `POST /api/v1/judge/calibrate`
+- `GET /api/v1/judge/calibration-report`
 - `GET /ws/scans/:id/status`
 
 Authentication model:

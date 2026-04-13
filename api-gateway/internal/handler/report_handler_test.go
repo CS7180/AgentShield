@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -20,13 +21,24 @@ import (
 
 // fakeReportRepo satisfies handler.ReportRepo.
 type fakeReportRepo struct {
-	report     *domain.Report
-	getErr     error
-	upsertErr  error
-	upsertSeen *domain.Report
+	report          *domain.Report
+	reportsByScanID map[uuid.UUID]*domain.Report
+	getErr          error
+	upsertErr       error
+	upsertSeen      *domain.Report
 }
 
-func (f *fakeReportRepo) GetByScanID(_ context.Context, _ uuid.UUID) (*domain.Report, error) {
+func (f *fakeReportRepo) GetByScanID(_ context.Context, scanID uuid.UUID) (*domain.Report, error) {
+	if f.getErr != nil {
+		return nil, f.getErr
+	}
+	if f.reportsByScanID != nil {
+		report, ok := f.reportsByScanID[scanID]
+		if !ok {
+			return nil, postgres.ErrNotFound
+		}
+		return report, nil
+	}
 	return f.report, f.getErr
 }
 
@@ -57,18 +69,24 @@ func (f *fakeUploader) Upload(_ context.Context, _, objectPath, _ string, _ []by
 func newReportRouter(h *handler.ReportHandler) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
+	userID := "00000000-0000-0000-0000-000000000001"
 	r.GET("/scans/:id/report", func(c *gin.Context) {
-		c.Set(middleware.UserIDKey, uuid.New().String())
+		c.Set(middleware.UserIDKey, userID)
 		c.Set(middleware.RequestIDKey, uuid.New().String())
 		h.GetJSON(c)
 	})
 	r.GET("/scans/:id/report/pdf", func(c *gin.Context) {
-		c.Set(middleware.UserIDKey, uuid.New().String())
+		c.Set(middleware.UserIDKey, userID)
 		c.Set(middleware.RequestIDKey, uuid.New().String())
 		h.GetPDF(c)
 	})
+	r.GET("/scans/:id/compare/:other_id", func(c *gin.Context) {
+		c.Set(middleware.UserIDKey, userID)
+		c.Set(middleware.RequestIDKey, uuid.New().String())
+		h.Compare(c)
+	})
 	r.PUT("/scans/:id/report", func(c *gin.Context) {
-		c.Set(middleware.UserIDKey, "00000000-0000-0000-0000-000000000001")
+		c.Set(middleware.UserIDKey, userID)
 		c.Set(middleware.RequestIDKey, uuid.New().String())
 		h.Upsert(c)
 	})
@@ -264,4 +282,121 @@ func TestUpsertReport_Returns500_WhenRepoFails(t *testing.T) {
 	r.ServeHTTP(w, req)
 
 	assertStatus(t, w, http.StatusInternalServerError)
+}
+
+func TestCompare_Returns200_WhenReportsExistAndOwned(t *testing.T) {
+	userID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	baseScanID := uuid.New()
+	otherScanID := uuid.New()
+	baseScore := 72.0
+	otherScore := 90.0
+
+	repo := &fakeReportRepo{
+		reportsByScanID: map[uuid.UUID]*domain.Report{
+			baseScanID: {
+				ScanID:        baseScanID,
+				UserID:        userID,
+				OverallScore:  &baseScore,
+				CriticalCount: 3,
+				HighCount:     2,
+				MediumCount:   1,
+				LowCount:      0,
+			},
+			otherScanID: {
+				ScanID:        otherScanID,
+				UserID:        userID,
+				OverallScore:  &otherScore,
+				CriticalCount: 1,
+				HighCount:     1,
+				MediumCount:   2,
+				LowCount:      1,
+			},
+		},
+	}
+
+	h := handler.NewReportHandler(repo, &fakeUploader{}, "agentshield-reports", zap.NewNop())
+	r := newReportRouter(h)
+
+	req := httptest.NewRequest(http.MethodGet, "/scans/"+baseScanID.String()+"/compare/"+otherScanID.String(), nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assertStatus(t, w, http.StatusOK)
+
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal compare response: %v", err)
+	}
+	score, ok := body["overall_score"].(map[string]any)
+	if !ok {
+		t.Fatalf("overall_score missing: %s", w.Body.String())
+	}
+	if trend, _ := score["trend"].(string); trend != "improved" {
+		t.Fatalf("trend = %v, want improved", trend)
+	}
+}
+
+func TestCompare_Returns404_WhenOtherReportMissing(t *testing.T) {
+	userID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	baseScanID := uuid.New()
+	otherScanID := uuid.New()
+	repo := &fakeReportRepo{
+		reportsByScanID: map[uuid.UUID]*domain.Report{
+			baseScanID: {
+				ScanID: baseScanID,
+				UserID: userID,
+			},
+		},
+	}
+
+	h := handler.NewReportHandler(repo, &fakeUploader{}, "agentshield-reports", zap.NewNop())
+	r := newReportRouter(h)
+
+	req := httptest.NewRequest(http.MethodGet, "/scans/"+baseScanID.String()+"/compare/"+otherScanID.String(), nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assertStatus(t, w, http.StatusNotFound)
+}
+
+func TestCompare_Returns400_WhenOtherIDInvalid(t *testing.T) {
+	repo := &fakeReportRepo{}
+	h := handler.NewReportHandler(repo, &fakeUploader{}, "agentshield-reports", zap.NewNop())
+	r := newReportRouter(h)
+
+	req := httptest.NewRequest(http.MethodGet, "/scans/"+uuid.New().String()+"/compare/not-a-uuid", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assertStatus(t, w, http.StatusBadRequest)
+	assertErrorCode(t, w, "INVALID_SCAN_ID")
+}
+
+func TestCompare_Returns403_WhenReportOwnershipMismatch(t *testing.T) {
+	currentUser := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	baseScanID := uuid.New()
+	otherScanID := uuid.New()
+
+	repo := &fakeReportRepo{
+		reportsByScanID: map[uuid.UUID]*domain.Report{
+			baseScanID: {
+				ScanID: baseScanID,
+				UserID: currentUser,
+			},
+			otherScanID: {
+				ScanID: otherScanID,
+				UserID: uuid.New(),
+			},
+		},
+	}
+
+	h := handler.NewReportHandler(repo, &fakeUploader{}, "agentshield-reports", zap.NewNop())
+	r := newReportRouter(h)
+
+	req := httptest.NewRequest(http.MethodGet, "/scans/"+baseScanID.String()+"/compare/"+otherScanID.String(), nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assertStatus(t, w, http.StatusForbidden)
+	assertErrorCode(t, w, "FORBIDDEN")
 }
