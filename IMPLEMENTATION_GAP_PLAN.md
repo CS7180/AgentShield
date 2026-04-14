@@ -57,6 +57,17 @@ Legend: `Done` = implemented in this repo; `Partial` = scaffolded/limited implem
 - Added orchestrator scan status event publisher abstraction + Kafka implementation (`publisher.go`).
 - Published orchestrator lifecycle/progress events to Kafka in pipeline execution path.
 - Wired orchestrator startup to use Kafka status publisher with noop fallback.
+- Added orchestrator bounded retry execution with exponential backoff:
+  - `ORCHESTRATOR_EXEC_MAX_ATTEMPTS`
+  - `ORCHESTRATOR_EXEC_RETRY_BASE_MS`
+  - `ORCHESTRATOR_EXEC_RETRY_MAX_MS`
+- Added idempotent retry behavior by resetting per-scan `attack_results` and `reports` before each retry attempt.
+- Added dead-letter persistence (`scan_dead_letters`) after retry exhaustion and gateway query endpoint:
+  - `GET /api/v1/scans/:id/dead-letters`
+- Added frontend monitoring linkage for report lifecycle:
+  - auto-generate report artifacts on scan completion when needed
+  - report readiness status and manual regenerate action
+  - dead-letter visibility in monitoring panel
 - Added runtime mode toggles and env wiring:
   - `AGENTS_EXECUTION_MODE=simulate|target_http`
   - `JUDGE_EVAL_MODE=rule|openai_compat`
@@ -69,12 +80,12 @@ Legend: `Done` = implemented in this repo; `Partial` = scaffolded/limited implem
 
 ### P0 (next)
 
-1. Add async queue + retry/dead-letter handling in orchestrator pipeline.
-   Acceptance: transient failures retry with bounded policy; terminal failures are queryable via dead-letter record.
+1. Introduce async queue worker lifecycle in orchestrator pipeline.
+   Acceptance: execution can be decoupled from direct request lifecycle with persistent queue semantics.
 2. Harden model-backed execution paths.
    Acceptance: `target_http` and `openai_compat` support configurable request/response schemas and deterministic fallback behavior.
-3. Finalize report lifecycle UX.
-   Acceptance: scan completion triggers/assists report generation path and exposes report readiness consistently in frontend.
+3. Add orchestration-level report artifact generation strategy.
+   Acceptance: artifact generation (JSON/PDF path lifecycle) is deterministic for all deployment modes.
 
 ### P1
 

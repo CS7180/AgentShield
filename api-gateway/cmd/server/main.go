@@ -77,6 +77,7 @@ func run() error {
 	scanRepo := pgrepo.NewScanRepository(pool)
 	reportRepo := pgrepo.NewReportRepository(pool)
 	attackResultRepo := pgrepo.NewAttackResultRepository(pool)
+	deadLetterRepo := pgrepo.NewScanDeadLetterRepository(pool)
 	judgeCalibrationRepo := pgrepo.NewJudgeCalibrationRepository(pool)
 	ownershipAdapter := pgrepo.NewOwnershipAdapter(scanRepo)
 
@@ -151,6 +152,7 @@ func run() error {
 	// Authenticated API routes
 	scanHandler := handler.NewScanHandler(scanRepo, orchClient, logger)
 	attackResultHandler := handler.NewAttackResultHandler(attackResultRepo, logger)
+	deadLetterHandler := handler.NewDeadLetterHandler(deadLetterRepo, logger)
 	reportHandler := handler.NewReportHandler(reportRepo, reportUploader, cfg.Supabase.ReportsBucket, logger)
 	reportGenerationHandler := handler.NewReportGenerationHandler(
 		reportRepo,
@@ -178,6 +180,7 @@ func run() error {
 			scans.POST("/:id/stop", ownership, scanHandler.Stop)
 			scans.POST("/:id/attack-results", ownership, attackResultHandler.CreateBatch)
 			scans.GET("/:id/attack-results", ownership, attackResultHandler.List)
+			scans.GET("/:id/dead-letters", ownership, deadLetterHandler.List)
 			scans.PUT("/:id/report", ownership, reportHandler.Upsert)
 			scans.GET("/:id/report", ownership, reportHandler.GetJSON)
 			scans.GET("/:id/report/pdf", ownership, reportHandler.GetPDF)

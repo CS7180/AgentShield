@@ -201,6 +201,7 @@ Current gateway endpoints:
 - `POST /api/v1/scans/:id/stop`
 - `POST /api/v1/scans/:id/attack-results`
 - `GET /api/v1/scans/:id/attack-results`
+- `GET /api/v1/scans/:id/dead-letters`
 - `PUT /api/v1/scans/:id/report`
 - `GET /api/v1/scans/:id/report`
 - `GET /api/v1/scans/:id/report/pdf`
@@ -215,6 +216,11 @@ Authentication model:
 - the frontend authenticates directly with Supabase
 - API requests must send `Authorization: Bearer <supabase_jwt>`
 - WebSocket connections pass the token with `?token=<supabase_jwt>`
+
+Retry and DLQ behavior:
+
+- orchestrator retries scan execution with exponential backoff (`ORCHESTRATOR_EXEC_MAX_ATTEMPTS`, `ORCHESTRATOR_EXEC_RETRY_BASE_MS`, `ORCHESTRATOR_EXEC_RETRY_MAX_MS`)
+- terminal failures are persisted in `scan_dead_letters` and queryable via `GET /api/v1/scans/:id/dead-letters`
 
 ## Product Roadmap
 

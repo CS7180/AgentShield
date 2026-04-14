@@ -70,6 +70,17 @@ export function listAttackResults(id, accessToken, { limit = 200, offset = 0 } =
   });
 }
 
+export function listScanDeadLetters(id, accessToken, { limit = 20, offset = 0 } = {}) {
+  const params = new URLSearchParams({
+    limit: String(limit),
+    offset: String(offset),
+  });
+  return request(`/api/v1/scans/${id}/dead-letters?${params.toString()}`, {
+    method: 'GET',
+    headers: authHeaders(accessToken),
+  });
+}
+
 export function getScanReport(id, accessToken) {
   return request(`/api/v1/scans/${id}/report`, {
     method: 'GET',

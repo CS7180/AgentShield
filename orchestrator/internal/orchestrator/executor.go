@@ -28,6 +28,10 @@ type PipelineExecutor interface {
 	MarkStopped(ctx context.Context, scanID string) error
 }
 
+type DeadLetterWriter interface {
+	WriteDeadLetter(ctx context.Context, req ScanExecutionRequest, attemptCount int, execErr error) error
+}
+
 type Executor struct {
 	db        *pgxpool.Pool
 	http      *http.Client
@@ -145,6 +149,9 @@ func (e *Executor) Execute(ctx context.Context, req ScanExecutionRequest, progre
 	if err := e.markRunning(ctx, req.ScanID); err != nil {
 		return e.failAndWrap(ctx, req.ScanID, "mark scan running", err)
 	}
+	if err := e.resetScanArtifacts(ctx, req.ScanID); err != nil {
+		return e.failAndWrap(ctx, req.ScanID, "reset scan artifacts", err)
+	}
 
 	progress(15)
 	userID, err := e.getScanOwner(ctx, req.ScanID)
@@ -187,6 +194,9 @@ func (e *Executor) Execute(ctx context.Context, req ScanExecutionRequest, progre
 
 	if err := e.markCompleted(ctx, req.ScanID); err != nil {
 		return e.failAndWrap(ctx, req.ScanID, "mark scan completed", err)
+	}
+	if err := e.clearDeadLetter(ctx, req.ScanID); err != nil {
+		e.logger.Warn("clear dead letter", zap.String("scan_id", req.ScanID), zap.Error(err))
 	}
 	progress(100)
 	return nil
@@ -415,7 +425,7 @@ func (e *Executor) upsertReport(ctx context.Context, req ScanExecutionRequest, u
 }
 
 func (e *Executor) markRunning(ctx context.Context, scanID string) error {
-	query := `UPDATE scans SET status = 'running', started_at = COALESCE(started_at, NOW()), updated_at = NOW() WHERE id = $1`
+	query := `UPDATE scans SET status = 'running', started_at = COALESCE(started_at, NOW()), completed_at = NULL, updated_at = NOW() WHERE id = $1`
 	_, err := e.db.Exec(ctx, query, scanID)
 	return err
 }
@@ -430,4 +440,86 @@ func (e *Executor) markFailed(ctx context.Context, scanID string) error {
 	query := `UPDATE scans SET status = 'failed', completed_at = NOW(), updated_at = NOW() WHERE id = $1`
 	_, err := e.db.Exec(ctx, query, scanID)
 	return err
+}
+
+func (e *Executor) resetScanArtifacts(ctx context.Context, scanID string) error {
+	tx, err := e.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if _, err := tx.Exec(ctx, `DELETE FROM attack_results WHERE scan_id = $1`, scanID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM reports WHERE scan_id = $1`, scanID); err != nil {
+		return err
+	}
+
+	return tx.Commit(ctx)
+}
+
+func (e *Executor) clearDeadLetter(ctx context.Context, scanID string) error {
+	_, err := e.db.Exec(ctx, `DELETE FROM scan_dead_letters WHERE scan_id = $1`, scanID)
+	return err
+}
+
+func (e *Executor) WriteDeadLetter(ctx context.Context, req ScanExecutionRequest, attemptCount int, execErr error) error {
+	userID, err := e.getScanOwner(ctx, req.ScanID)
+	if err != nil {
+		return err
+	}
+
+	payload, _ := json.Marshal(map[string]any{
+		"target_endpoint": req.TargetEndpoint,
+		"mode":            req.Mode,
+		"attack_types":    req.AttackTypes,
+	})
+
+	query := `
+		INSERT INTO scan_dead_letters (
+			id, scan_id, user_id, attempt_count, error_stage, error_message,
+			payload, failed_at, created_at, updated_at
+		) VALUES (
+			$1, $2, $3, $4, $5, $6,
+			$7, NOW(), NOW(), NOW()
+		)
+		ON CONFLICT (scan_id) DO UPDATE SET
+			user_id = EXCLUDED.user_id,
+			attempt_count = EXCLUDED.attempt_count,
+			error_stage = EXCLUDED.error_stage,
+			error_message = EXCLUDED.error_message,
+			payload = EXCLUDED.payload,
+			failed_at = NOW(),
+			updated_at = NOW()`
+
+	_, err = e.db.Exec(
+		ctx,
+		query,
+		uuid.New(),
+		req.ScanID,
+		userID,
+		attemptCount,
+		deriveErrorStage(execErr),
+		execErr.Error(),
+		payload,
+	)
+	return err
+}
+
+func deriveErrorStage(err error) string {
+	if err == nil {
+		return "unknown"
+	}
+	msg := strings.TrimSpace(err.Error())
+	if msg == "" {
+		return "unknown"
+	}
+	if idx := strings.Index(msg, ":"); idx > 0 {
+		stage := strings.TrimSpace(msg[:idx])
+		if stage != "" {
+			return stage
+		}
+	}
+	return "pipeline_execute"
 }

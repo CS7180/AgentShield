@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   API_BASE,
+  generateScanReport,
   getScan,
+  getScanReport,
   listAttackResults,
+  listScanDeadLetters,
   listScans,
   startScan,
   stopScan,
@@ -41,6 +44,21 @@ function statusColor(status) {
   }
 }
 
+function reportStatusColor(status) {
+  switch (status) {
+    case 'ready':
+      return '#34d399';
+    case 'partial':
+      return '#fbbf24';
+    case 'generating':
+      return '#60a5fa';
+    case 'failed':
+      return '#fb7185';
+    default:
+      return '#737373';
+  }
+}
+
 function attackLabel(key) {
   return {
     prompt_injection: 'Prompt Injection',
@@ -65,6 +83,13 @@ export default function ScanMonitorContent() {
   const [selectedScanID, setSelectedScanID] = useState('');
   const [scan, setScan] = useState(null);
   const [results, setResults] = useState([]);
+  const [reportState, setReportState] = useState({
+    status: 'unknown',
+    message: 'No scan selected.',
+    hasPDF: false,
+    hasJSON: false,
+  });
+  const [deadLetters, setDeadLetters] = useState([]);
   const [feed, setFeed] = useState([]);
 
   const [loading, setLoading] = useState(true);
@@ -72,6 +97,7 @@ export default function ScanMonitorContent() {
   const [error, setError] = useState('');
 
   const wsRef = useRef(null);
+  const autoReportAttemptRef = useRef({});
 
   useEffect(() => {
     if (!token) return;
@@ -120,6 +146,17 @@ export default function ScanMonitorContent() {
         setScan(scanResp);
         setResults(resultResp.results || []);
 
+        try {
+          const deadLetterResp = await listScanDeadLetters(selectedScanID, token, { limit: 5, offset: 0 });
+          if (!cancelled) {
+            setDeadLetters(deadLetterResp.entries || []);
+          }
+        } catch {
+          if (!cancelled) {
+            setDeadLetters([]);
+          }
+        }
+
         const nextFeed = (resultResp.results || [])
           .slice()
           .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
@@ -135,6 +172,87 @@ export default function ScanMonitorContent() {
               : 'Attack blocked or ineffective',
           }));
         setFeed(nextFeed);
+
+        let report = null;
+        try {
+          report = await getScanReport(selectedScanID, token);
+        } catch {
+          report = null;
+        }
+
+        const scanDone = ['completed', 'failed', 'stopped'].includes(scanResp.status);
+        const hasJSONPath = Boolean(report?.report_json_path);
+        const hasPDFPath = Boolean(report?.report_pdf_path);
+
+        if (report) {
+          setReportState({
+            status: hasJSONPath && hasPDFPath ? 'ready' : 'partial',
+            message: hasJSONPath && hasPDFPath
+              ? 'Report artifacts are ready.'
+              : 'Report persisted, but storage artifacts are incomplete.',
+            hasPDF: hasPDFPath,
+            hasJSON: hasJSONPath,
+          });
+        } else {
+          setReportState({
+            status: scanDone ? 'missing' : 'pending',
+            message: scanDone ? 'Scan finished but report is not available yet.' : 'Waiting for scan completion.',
+            hasPDF: false,
+            hasJSON: false,
+          });
+        }
+
+        const shouldAutoGenerate =
+          scanResp.status === 'completed' &&
+          (!report || !hasJSONPath || !hasPDFPath) &&
+          !autoReportAttemptRef.current[selectedScanID];
+
+        if (shouldAutoGenerate) {
+          autoReportAttemptRef.current[selectedScanID] = true;
+          setReportState({
+            status: 'generating',
+            message: 'Generating report artifacts...',
+            hasPDF: hasPDFPath,
+            hasJSON: hasJSONPath,
+          });
+          try {
+            const generated = await generateScanReport(selectedScanID, token, true);
+            if (!cancelled) {
+              const generatedJSON = Boolean(generated?.report_json_path);
+              const generatedPDF = Boolean(generated?.report_pdf_path);
+              setReportState({
+                status: generatedJSON && generatedPDF ? 'ready' : 'partial',
+                message: generatedJSON && generatedPDF
+                  ? 'Report generated and artifacts uploaded.'
+                  : 'Report generated, but uploader/storage is not fully configured.',
+                hasPDF: generatedPDF,
+                hasJSON: generatedJSON,
+              });
+              setFeed((prev) => [
+                {
+                  id: `report-${Date.now()}`,
+                  time: new Date().toLocaleTimeString(),
+                  type: 'judge',
+                  severity: 'info',
+                  title: 'report.lifecycle',
+                  message: generatedJSON && generatedPDF
+                    ? 'report artifacts ready'
+                    : 'report generated without full artifacts',
+                },
+                ...prev,
+              ].slice(0, 30));
+            }
+          } catch (err) {
+            if (!cancelled) {
+              setReportState({
+                status: 'failed',
+                message: err.message || 'Auto report generation failed.',
+                hasPDF: false,
+                hasJSON: false,
+              });
+            }
+          }
+        }
       } catch (err) {
         if (!cancelled) setError(err.message || 'Failed to load scan detail');
       } finally {
@@ -277,6 +395,40 @@ export default function ScanMonitorContent() {
     }
   }
 
+  async function handleGenerateReport() {
+    if (!scan || !token) return;
+    setActionLoading(true);
+    setError('');
+    setReportState((prev) => ({
+      ...prev,
+      status: 'generating',
+      message: 'Generating report artifacts...',
+    }));
+    try {
+      const generated = await generateScanReport(scan.id, token, true);
+      const hasJSON = Boolean(generated?.report_json_path);
+      const hasPDF = Boolean(generated?.report_pdf_path);
+      setReportState({
+        status: hasJSON && hasPDF ? 'ready' : 'partial',
+        message: hasJSON && hasPDF
+          ? 'Report generated and artifacts uploaded.'
+          : 'Report generated, but uploader/storage is not fully configured.',
+        hasPDF,
+        hasJSON,
+      });
+      autoReportAttemptRef.current[scan.id] = true;
+    } catch (err) {
+      setReportState({
+        status: 'failed',
+        message: err.message || 'Report generation failed.',
+        hasPDF: false,
+        hasJSON: false,
+      });
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       <div>
@@ -379,20 +531,80 @@ export default function ScanMonitorContent() {
           </div>
         </div>
 
-        <div style={panelStyle}>
-          <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 10 }}>Defense/Judge Summary</div>
-          <div style={{ display: 'grid', gap: 10 }}>
-            <MetricRow label="Blocked by defense" value={String(defenseSummary.blocked)} />
-            <MetricRow label="Successful attacks" value={String(defenseSummary.successful)} tone="#fb7185" />
-            <MetricRow
-              label="Avg judge confidence"
-              value={
-                defenseSummary.avgConfidence == null
-                  ? 'N/A'
-                  : defenseSummary.avgConfidence.toFixed(2)
-              }
-              tone="#60a5fa"
-            />
+        <div style={{ display: 'grid', gap: 14 }}>
+          <div style={panelStyle}>
+            <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 10 }}>Defense/Judge Summary</div>
+            <div style={{ display: 'grid', gap: 10 }}>
+              <MetricRow label="Blocked by defense" value={String(defenseSummary.blocked)} />
+              <MetricRow label="Successful attacks" value={String(defenseSummary.successful)} tone="#fb7185" />
+              <MetricRow
+                label="Avg judge confidence"
+                value={
+                  defenseSummary.avgConfidence == null
+                    ? 'N/A'
+                    : defenseSummary.avgConfidence.toFixed(2)
+                }
+                tone="#60a5fa"
+              />
+            </div>
+          </div>
+
+          <div style={panelStyle}>
+            <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 10 }}>Report Lifecycle</div>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: reportStatusColor(reportState.status), fontSize: 12, marginBottom: 8 }}>
+              <Dot color={reportStatusColor(reportState.status)} size={7} />
+              {reportState.status}
+            </div>
+            <div style={{ color: '#a3a3a3', fontSize: 12, marginBottom: 10 }}>{reportState.message}</div>
+            <div style={{ display: 'grid', gap: 8 }}>
+              <MetricRow label="JSON Artifact" value={reportState.hasJSON ? 'Yes' : 'No'} tone={reportState.hasJSON ? '#34d399' : '#fbbf24'} />
+              <MetricRow label="PDF Artifact" value={reportState.hasPDF ? 'Yes' : 'No'} tone={reportState.hasPDF ? '#34d399' : '#fbbf24'} />
+            </div>
+            <button
+              type="button"
+              onClick={handleGenerateReport}
+              disabled={!scan || actionLoading}
+              style={{
+                marginTop: 10,
+                height: 34,
+                borderRadius: 10,
+                border: '1px solid rgba(59,130,246,0.35)',
+                background: 'rgba(59,130,246,0.14)',
+                color: '#93c5fd',
+                padding: '0 12px',
+                cursor: !scan || actionLoading ? 'not-allowed' : 'pointer',
+                opacity: !scan || actionLoading ? 0.6 : 1,
+              }}
+            >
+              Generate Report Now
+            </button>
+          </div>
+
+          <div style={panelStyle}>
+            <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 10 }}>Dead Letters (Retry Exhausted)</div>
+            {deadLetters.length === 0 && (
+              <div style={{ color: '#737373', fontSize: 12 }}>No dead-letter records for this scan.</div>
+            )}
+            {deadLetters.map((item) => (
+              <div
+                key={item.id}
+                style={{
+                  borderRadius: 10,
+                  border: '1px solid rgba(255,255,255,0.07)',
+                  background: 'rgba(255,255,255,0.02)',
+                  padding: '10px 12px',
+                  display: 'grid',
+                  gap: 6,
+                  marginBottom: 8,
+                }}
+              >
+                <div style={{ fontSize: 12, color: '#fda4af' }}>
+                  attempts {item.attempt_count} · stage {item.error_stage}
+                </div>
+                <div style={{ fontSize: 12, color: '#a3a3a3', wordBreak: 'break-word' }}>{item.error_message}</div>
+                <div style={{ fontSize: 11, color: '#737373' }}>{toFeedTimestamp(item.failed_at)}</div>
+              </div>
+            ))}
           </div>
         </div>
       </div>

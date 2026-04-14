@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"strconv"
+	"time"
 
 	pb "github.com/agentshield/api-gateway/proto/orchestrator"
 	"github.com/google/uuid"
@@ -12,10 +15,17 @@ import (
 
 type Server struct {
 	pb.UnimplementedOrchestratorServiceServer
-	manager  *Manager
-	executor PipelineExecutor
+	manager   *Manager
+	executor  PipelineExecutor
 	publisher ScanEventPublisher
-	logger   *zap.Logger
+	logger    *zap.Logger
+	retry     retryPolicy
+}
+
+type retryPolicy struct {
+	maxAttempts int
+	baseBackoff time.Duration
+	maxBackoff  time.Duration
 }
 
 func NewServer(executor PipelineExecutor, logger *zap.Logger) *Server {
@@ -30,10 +40,11 @@ func NewServerWithPublisher(executor PipelineExecutor, publisher ScanEventPublis
 		publisher = NewNoopScanEventPublisher(logger)
 	}
 	return &Server{
-		manager:  NewManager(),
-		executor: executor,
+		manager:   NewManager(),
+		executor:  executor,
 		publisher: publisher,
-		logger:   logger,
+		logger:    logger,
+		retry:     loadRetryPolicyFromEnv(),
 	}
 }
 
@@ -92,23 +103,90 @@ func (s *Server) ScanStatus(_ context.Context, req *pb.ScanStatusRequest) (*pb.S
 }
 
 func (s *Server) runPipeline(ctx context.Context, req ScanExecutionRequest) {
-	err := s.executor.Execute(ctx, req, func(progress int) {
-		if setErr := s.manager.SetProgress(req.ScanID, progress); setErr != nil {
-			s.logger.Warn("set pipeline progress", zap.String("scan_id", req.ScanID), zap.Error(setErr))
+	attempts := s.retry.maxAttempts
+	if attempts < 1 {
+		attempts = 1
+	}
+
+	backoff := s.retry.baseBackoff
+	if backoff <= 0 {
+		backoff = 1 * time.Second
+	}
+
+	var lastErr error
+	for attempt := 1; attempt <= attempts; attempt++ {
+		lastErr = s.executor.Execute(ctx, req, func(progress int) {
+			if setErr := s.manager.SetProgress(req.ScanID, progress); setErr != nil {
+				s.logger.Warn("set pipeline progress", zap.String("scan_id", req.ScanID), zap.Error(setErr))
+			}
+			s.publishStatus(req.ScanID, ScanStatusRunning, progress, "pipeline progress update")
+		})
+		if lastErr == nil {
+			break
 		}
-		s.publishStatus(req.ScanID, ScanStatusRunning, progress, "pipeline progress update")
-	})
-	if err != nil {
-		if errors.Is(err, context.Canceled) {
+		if errors.Is(lastErr, context.Canceled) {
 			s.logger.Info("scan pipeline canceled", zap.String("scan_id", req.ScanID))
 			status, progress := s.manager.GetStatus(req.ScanID)
 			s.publishStatus(req.ScanID, status, progress, "scan canceled")
 			return
 		}
+		if attempt >= attempts {
+			break
+		}
+
+		status, progress := s.manager.GetStatus(req.ScanID)
+		s.publishStatus(
+			req.ScanID,
+			status,
+			progress,
+			fmt.Sprintf("attempt %d/%d failed: %v; retrying", attempt, attempts, lastErr),
+		)
+		s.logger.Warn(
+			"scan pipeline attempt failed; retrying",
+			zap.String("scan_id", req.ScanID),
+			zap.Int("attempt", attempt),
+			zap.Int("max_attempts", attempts),
+			zap.Error(lastErr),
+		)
+
+		timer := time.NewTimer(backoff)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			s.logger.Info("scan canceled during retry backoff", zap.String("scan_id", req.ScanID))
+			status, progress := s.manager.GetStatus(req.ScanID)
+			s.publishStatus(req.ScanID, status, progress, "scan canceled")
+			return
+		case <-timer.C:
+		}
+
+		next := backoff * 2
+		if s.retry.maxBackoff > 0 && next > s.retry.maxBackoff {
+			next = s.retry.maxBackoff
+		}
+		backoff = next
+	}
+
+	if lastErr != nil {
 		_ = s.manager.MarkFailed(req.ScanID)
 		status, progress := s.manager.GetStatus(req.ScanID)
-		s.publishStatus(req.ScanID, status, progress, err.Error())
-		s.logger.Error("scan pipeline failed", zap.String("scan_id", req.ScanID), zap.Error(err))
+		s.publishStatus(req.ScanID, status, progress, fmt.Sprintf("scan failed after %d attempts: %v", attempts, lastErr))
+
+		if writer, ok := s.executor.(DeadLetterWriter); ok {
+			if err := writer.WriteDeadLetter(context.Background(), req, attempts, lastErr); err != nil {
+				s.logger.Warn("persist dead letter failed", zap.String("scan_id", req.ScanID), zap.Error(err))
+				s.publishStatus(req.ScanID, status, progress, "dead letter persist failed")
+			} else {
+				s.publishStatus(req.ScanID, status, progress, "dead letter persisted")
+			}
+		}
+
+		s.logger.Error(
+			"scan pipeline failed",
+			zap.String("scan_id", req.ScanID),
+			zap.Int("attempts", attempts),
+			zap.Error(lastErr),
+		)
 		return
 	}
 
@@ -126,4 +204,30 @@ func (s *Server) publishStatus(scanID, status string, progress int, detail strin
 	if err := s.publisher.PublishScanStatus(context.Background(), scanID, status, progress, detail); err != nil {
 		s.logger.Warn("publish scan status event", zap.String("scan_id", scanID), zap.Error(err))
 	}
+}
+
+func loadRetryPolicyFromEnv() retryPolicy {
+	maxAttempts := parsePositiveIntEnv("ORCHESTRATOR_EXEC_MAX_ATTEMPTS", 3)
+	baseMs := parsePositiveIntEnv("ORCHESTRATOR_EXEC_RETRY_BASE_MS", 1000)
+	maxMs := parsePositiveIntEnv("ORCHESTRATOR_EXEC_RETRY_MAX_MS", 8000)
+	if maxMs < baseMs {
+		maxMs = baseMs
+	}
+	return retryPolicy{
+		maxAttempts: maxAttempts,
+		baseBackoff: time.Duration(baseMs) * time.Millisecond,
+		maxBackoff:  time.Duration(maxMs) * time.Millisecond,
+	}
+}
+
+func parsePositiveIntEnv(key string, fallback int) int {
+	raw := os.Getenv(key)
+	if raw == "" {
+		return fallback
+	}
+	v, err := strconv.Atoi(raw)
+	if err != nil || v <= 0 {
+		return fallback
+	}
+	return v
 }
