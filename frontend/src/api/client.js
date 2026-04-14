@@ -1,4 +1,4 @@
-const API_BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:8080';
+export const API_BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:8080';
 
 function authHeaders(accessToken) {
   return {
@@ -27,8 +27,12 @@ export function createScan(payload, accessToken) {
   });
 }
 
-export function listScans(accessToken) {
-  return request('/api/v1/scans', {
+export function listScans(accessToken, { limit = 50, offset = 0 } = {}) {
+  const params = new URLSearchParams({
+    limit: String(limit),
+    offset: String(offset),
+  });
+  return request(`/api/v1/scans?${params.toString()}`, {
     method: 'GET',
     headers: authHeaders(accessToken),
   });
@@ -55,6 +59,17 @@ export function stopScan(id, accessToken) {
   });
 }
 
+export function listAttackResults(id, accessToken, { limit = 200, offset = 0 } = {}) {
+  const params = new URLSearchParams({
+    limit: String(limit),
+    offset: String(offset),
+  });
+  return request(`/api/v1/scans/${id}/attack-results?${params.toString()}`, {
+    method: 'GET',
+    headers: authHeaders(accessToken),
+  });
+}
+
 export function getScanReport(id, accessToken) {
   return request(`/api/v1/scans/${id}/report`, {
     method: 'GET',
@@ -62,8 +77,31 @@ export function getScanReport(id, accessToken) {
   });
 }
 
+export function generateScanReport(id, accessToken, includePDF = true) {
+  return request(`/api/v1/scans/${id}/report/generate`, {
+    method: 'POST',
+    headers: authHeaders(accessToken),
+    body: JSON.stringify({ include_pdf: includePDF }),
+  });
+}
+
 export function compareScans(baseScanID, otherScanID, accessToken) {
   return request(`/api/v1/scans/${baseScanID}/compare/${otherScanID}`, {
+    method: 'GET',
+    headers: authHeaders(accessToken),
+  });
+}
+
+export function calibrateJudge(samples, accessToken) {
+  return request('/api/v1/judge/calibrate', {
+    method: 'POST',
+    headers: authHeaders(accessToken),
+    body: JSON.stringify({ samples }),
+  });
+}
+
+export function getJudgeCalibrationReport(accessToken) {
+  return request('/api/v1/judge/calibration-report', {
     method: 'GET',
     headers: authHeaders(accessToken),
   });

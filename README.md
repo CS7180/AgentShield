@@ -65,21 +65,25 @@ The Go API gateway already includes:
 - Prometheus health and metrics endpoints
 - gRPC orchestration integration to standalone orchestrator service
 
-The following API capabilities are implemented in the gateway:
+The following API and integration capabilities are implemented:
 
 - judge calibration calculation endpoint (`POST /api/v1/judge/calibrate`) and latest calibration report retrieval (`GET /api/v1/judge/calibration-report`) with PostgreSQL persistence
 - attack result ingestion/list endpoints for each scan
 - report JSON upsert/retrieval, report generation from attack results, and PDF artifact path retrieval
 - scan report comparison (`GET /api/v1/scans/:id/compare/:other_id`)
-- frontend report comparison route wired to compare API (`/reports`)
+- frontend pages wired to live APIs for dashboard, scan creation/start, monitoring, report compare, and judge calibration
+- WebSocket scan status feed path wired end-to-end (`orchestrator -> Kafka topic -> gateway dispatcher -> /ws/scans/:id/status`)
+- service runtime modes for local-to-real transition:
+  - `AGENTS_EXECUTION_MODE=simulate|target_http`
+  - `JUDGE_EVAL_MODE=rule|openai_compat` (+ `JUDGE_LLM_*`)
 - repository CI workflow for api-gateway/orchestrator/agents/judge tests and frontend build
 - baseline api-gateway coverage gate (`make coverage-check`, default threshold: 25%)
 
 The following platform capabilities are still pending:
 
-- production-grade Python/CrewAI agent implementations (current agents service is deterministic simulator)
-- richer LLM-as-Judge model calibration/evaluation workflows (current judge service is rule-based simulator)
-- async queue workers and deployment automation for multi-service production rollout
+- production-grade Python/CrewAI multi-agent implementations (current `agents` service supports simulator or direct target HTTP execution)
+- richer LLM-as-Judge calibration benchmark workflows and expanded golden set (current `judge` service supports rule or OpenAI-compatible inference mode)
+- async queue workers with retry/dead-letter semantics and deployment automation for multi-service production rollout
 
 When `ORCHESTRATOR_ENABLED=false`, the gateway uses a stub orchestrator and newly started scans are queued instead of being executed end-to-end.
 
@@ -147,6 +151,14 @@ Run the gateway:
 ```bash
 cd api-gateway
 make run
+```
+
+Run frontend dashboard:
+
+```bash
+cd frontend
+npm install
+npm run dev
 ```
 
 Run services manually in separate terminals (optional alternative to `make docker-full`):

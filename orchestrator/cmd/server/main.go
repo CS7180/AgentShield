@@ -38,13 +38,26 @@ func main() {
 		pipeline = orchestrator.NewNoopExecutor(logger)
 	}
 
+	publisher, err := orchestrator.NewKafkaScanEventPublisherFromEnv(logger)
+	if err != nil {
+		logger.Warn("failed to init kafka scan event publisher, falling back to noop", zap.Error(err))
+		publisher = nil
+	}
+	var eventPublisher orchestrator.ScanEventPublisher
+	if publisher != nil {
+		eventPublisher = publisher
+		defer publisher.Close()
+	} else {
+		eventPublisher = orchestrator.NewNoopScanEventPublisher(logger)
+	}
+
 	lis, err := net.Listen("tcp", ":"+port)
 	if err != nil {
 		logger.Fatal("listen", zap.Error(err), zap.String("port", port))
 	}
 
 	grpcServer := grpc.NewServer()
-	pb.RegisterOrchestratorServiceServer(grpcServer, orchestrator.NewServer(pipeline, logger))
+	pb.RegisterOrchestratorServiceServer(grpcServer, orchestrator.NewServerWithPublisher(pipeline, eventPublisher, logger))
 
 	go func() {
 		logger.Info("orchestrator server listening", zap.String("port", port))

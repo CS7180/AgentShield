@@ -1,144 +1,312 @@
-import { useState } from "react";
+import { useMemo, useState } from 'react';
+import { createScan, startScan } from './api/client';
+import useAuth from './auth/useAuth';
 
-const NewScanContent = () => {
-  const [mode, setMode] = useState("red_team");
-  const [attacks, setAttacks] = useState({ injection: true, jailbreak: true, leakage: true, drift: false });
+const MODES = [
+  {
+    key: 'red_team',
+    label: 'Red Team',
+    desc: 'Attack only, no defense.',
+  },
+  {
+    key: 'blue_team',
+    label: 'Blue Team',
+    desc: 'Defense posture verification.',
+  },
+  {
+    key: 'adversarial',
+    label: 'Adversarial',
+    desc: 'Red + blue together.',
+  },
+];
 
-  const modes = [
-    { key: "red_team", label: "Red team", desc: "Attack only, no defense", color: "#fb7185", bg: "rgba(244,63,94,0.12)", border: "rgba(251,113,133,0.3)" },
-    { key: "blue_team", label: "Blue team", desc: "Defense only, measure FP rate", color: "#7dd3fc", bg: "rgba(14,165,233,0.12)", border: "rgba(56,189,248,0.3)" },
-    { key: "adversarial", label: "Adversarial", desc: "Red + blue simultaneous", color: "#c4b5fd", bg: "rgba(139,92,246,0.12)", border: "rgba(139,92,246,0.3)" },
-  ];
+const ATTACK_OPTIONS = [
+  { key: 'prompt_injection', label: 'Prompt Injection' },
+  { key: 'jailbreak', label: 'Jailbreak' },
+  { key: 'data_leakage', label: 'Data Leakage' },
+  { key: 'constraint_drift', label: 'Constraint Drift' },
+];
 
-  const attackTypes = [
-    { key: "injection", label: "Prompt injection", desc: "Direct, indirect, encoding bypass", owasp: "#1", gradient: "linear-gradient(90deg, #ef4444, #f97316, #ec4899)" },
-    { key: "jailbreak", label: "Jailbreak", desc: "Role-play, crescendo, mutation", owasp: "—", gradient: "linear-gradient(90deg, #ec4899, #a855f7, #6366f1)" },
-    { key: "leakage", label: "Data leakage", desc: "System prompt, PII, credentials", owasp: "#2", gradient: "linear-gradient(90deg, #8b5cf6, #6366f1, #3b82f6)" },
-    { key: "drift", label: "Constraint drift", desc: "Context inflation, multi-turn erosion", owasp: "—", gradient: "linear-gradient(90deg, #6366f1, #3b82f6, #06b6d4)" },
-  ];
+function Dot({ color, size = 7 }) {
+  return (
+    <span
+      style={{
+        height: size,
+        width: size,
+        borderRadius: '50%',
+        background: color,
+        boxShadow: `0 0 10px ${color}`,
+        flexShrink: 0,
+      }}
+    />
+  );
+}
 
-  const defenseAgents = [
-    { label: "Input guard", desc: "Detect injection patterns" },
-    { label: "Output filter", desc: "Block leakage in responses" },
-    { label: "Behavior monitor", desc: "Anomalous tool calling" },
-    { label: "Constraint persistence", desc: "Verify safety instructions" },
-  ];
+function isValidHTTPS(url) {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
 
-  const Dot = ({ color, size = 7 }) => (
-    <span style={{ height: size, width: size, borderRadius: "50%", background: color, boxShadow: `0 0 10px ${color}`, flexShrink: 0 }} />
+export default function NewScanContent() {
+  const { session } = useAuth();
+  const token = session?.access_token;
+
+  const [targetEndpoint, setTargetEndpoint] = useState('');
+  const [mode, setMode] = useState('red_team');
+  const [attackSelections, setAttackSelections] = useState({
+    prompt_injection: true,
+    jailbreak: true,
+    data_leakage: true,
+    constraint_drift: false,
+  });
+  const [autoStart, setAutoStart] = useState(true);
+
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
+  const [info, setInfo] = useState('');
+  const [createdScan, setCreatedScan] = useState(null);
+
+  const selectedAttackTypes = useMemo(
+    () => ATTACK_OPTIONS.filter((a) => attackSelections[a.key]).map((a) => a.key),
+    [attackSelections],
   );
 
+  async function handleTestEndpoint() {
+    if (!isValidHTTPS(targetEndpoint)) {
+      setError('Target endpoint must be a valid HTTPS URL.');
+      return;
+    }
+    setError('');
+    setInfo('Endpoint format looks valid.');
+  }
+
+  async function handleSubmit() {
+    if (!token) {
+      setError('Missing access token. Please log in again.');
+      return;
+    }
+    if (!isValidHTTPS(targetEndpoint)) {
+      setError('Target endpoint must be a valid HTTPS URL.');
+      return;
+    }
+    if (selectedAttackTypes.length === 0) {
+      setError('Select at least one attack type.');
+      return;
+    }
+
+    setSubmitting(true);
+    setError('');
+    setInfo('');
+
+    try {
+      const created = await createScan(
+        {
+          target_endpoint: targetEndpoint,
+          mode,
+          attack_types: selectedAttackTypes,
+        },
+        token,
+      );
+
+      let status = created.status;
+      let message = 'Scan created.';
+      if (autoStart) {
+        const started = await startScan(created.id, token);
+        status = started.status;
+        message = started.message || 'Scan created and start requested.';
+      }
+
+      setCreatedScan({ ...created, status });
+      setInfo(message);
+    } catch (err) {
+      setError(err.message || 'Failed to create/start scan.');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   return (
-    <>
-      {/* Header */}
-      <div style={{ marginBottom: 28 }}>
-        <h1 style={{ fontSize: 26, fontWeight: 700, margin: 0, letterSpacing: "-0.02em" }}>Create new scan</h1>
-        <p style={{ fontSize: 12, color: "#3f3f3f", marginTop: 4 }}>Configure target, mode, and attack agents</p>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      <div>
+        <h1 style={{ fontSize: 26, fontWeight: 700, margin: 0, letterSpacing: '-0.02em' }}>Create Scan</h1>
+        <p style={{ fontSize: 12, color: '#737373', marginTop: 6 }}>
+          Configure target and attack profile, then create or start a real scan.
+        </p>
       </div>
 
-      {/* ── Target endpoint ── */}
-      <div style={{ borderRadius: 16, border: "1px solid rgba(255,255,255,0.06)", background: "linear-gradient(135deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01))", padding: "20px", marginBottom: 20 }}>
-        <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.2em", color: "#525252", marginBottom: 12 }}>Target API endpoint</div>
-        <div style={{ display: "flex", gap: 12 }}>
-          <div style={{ flex: 1, height: 44, borderRadius: 10, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.03)", display: "flex", alignItems: "center", padding: "0 16px" }}>
-            <span style={{ fontSize: 13, color: "#525252" }}>https://api.docmind.dev/v1/chat</span>
-          </div>
-          <button style={{ height: 44, borderRadius: 10, border: "1px solid rgba(52,211,153,0.25)", background: "rgba(52,211,153,0.08)", padding: "0 20px", fontSize: 12, color: "#34d399", cursor: "pointer", whiteSpace: "nowrap" }}>Test connection</button>
+      {error && <div style={{ color: '#fb7185', fontSize: 12 }}>{error}</div>}
+      {info && <div style={{ color: '#34d399', fontSize: 12 }}>{info}</div>}
+
+      <div style={panelStyle}>
+        <div style={sectionTitle}>Target Endpoint</div>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          <input
+            value={targetEndpoint}
+            onChange={(e) => setTargetEndpoint(e.target.value.trim())}
+            placeholder="https://example.com/v1/chat"
+            style={inputStyle}
+          />
+          <button type="button" onClick={handleTestEndpoint} style={ghostButtonStyle}>
+            Validate URL
+          </button>
         </div>
       </div>
 
-      {/* ── Testing mode ── */}
-      <div style={{ borderRadius: 16, border: "1px solid rgba(255,255,255,0.06)", background: "linear-gradient(135deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01))", padding: "20px", marginBottom: 20 }}>
-        <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.2em", color: "#525252", marginBottom: 16 }}>Testing mode</div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
-          {modes.map((m) => {
-            const selected = mode === m.key;
+      <div style={panelStyle}>
+        <div style={sectionTitle}>Mode</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10 }}>
+          {MODES.map((item) => {
+            const selected = mode === item.key;
             return (
-              <div key={m.key} onClick={() => setMode(m.key)} style={{
-                borderRadius: 12, padding: "16px",
-                border: selected ? `1px solid ${m.border}` : "1px solid rgba(255,255,255,0.06)",
-                background: selected ? m.bg : "rgba(255,255,255,0.02)",
-                cursor: "pointer", transition: "all 0.15s",
-              }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-                  <Dot color={selected ? m.color : "#3f3f3f"} size={8} />
-                  <span style={{ fontSize: 13, fontWeight: 600, color: selected ? m.color : "#737373" }}>{m.label}</span>
+              <button
+                key={item.key}
+                type="button"
+                onClick={() => setMode(item.key)}
+                style={{
+                  textAlign: 'left',
+                  borderRadius: 12,
+                  border: selected
+                    ? '1px solid rgba(59,130,246,0.45)'
+                    : '1px solid rgba(255,255,255,0.08)',
+                  background: selected ? 'rgba(59,130,246,0.12)' : 'rgba(255,255,255,0.02)',
+                  padding: 12,
+                  color: '#f5f5f5',
+                  cursor: 'pointer',
+                }}
+              >
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                  <Dot color={selected ? '#60a5fa' : '#737373'} size={7} />
+                  <span style={{ fontSize: 13, fontWeight: 600 }}>{item.label}</span>
                 </div>
-                <div style={{ fontSize: 11, color: "#525252", lineHeight: 1.4 }}>{m.desc}</div>
-              </div>
+                <div style={{ fontSize: 11, color: '#9ca3af' }}>{item.desc}</div>
+              </button>
             );
           })}
         </div>
       </div>
 
-      {/* ── Attack agents ── */}
-      <div style={{ borderRadius: 16, border: "1px solid rgba(255,255,255,0.06)", background: "linear-gradient(135deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01))", padding: "20px", marginBottom: 20 }}>
-        <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.2em", color: "#525252", marginBottom: 16 }}>Red team agents</div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 12 }}>
-          {attackTypes.map((a) => {
-            const checked = attacks[a.key];
+      <div style={panelStyle}>
+        <div style={sectionTitle}>Attack Types</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10 }}>
+          {ATTACK_OPTIONS.map((option) => {
+            const selected = attackSelections[option.key];
             return (
-              <div key={a.key} onClick={() => setAttacks(p => ({ ...p, [a.key]: !p[a.key] }))} style={{
-                borderRadius: 12, padding: "16px",
-                border: checked ? "1px solid rgba(255,255,255,0.1)" : "1px solid rgba(255,255,255,0.04)",
-                background: checked ? "rgba(255,255,255,0.04)" : "rgba(255,255,255,0.015)",
-                cursor: "pointer", transition: "all 0.15s",
-              }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                  <span style={{ fontSize: 13, fontWeight: 600, color: checked ? "#fff" : "#525252" }}>{a.label}</span>
-                  <div style={{
-                    height: 20, width: 20, borderRadius: 5,
-                    border: checked ? "none" : "1px solid rgba(255,255,255,0.12)",
-                    background: checked ? a.gradient : "transparent",
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                    fontSize: 11, color: "#fff", fontWeight: 700,
-                  }}>{checked ? "✓" : ""}</div>
+              <button
+                key={option.key}
+                type="button"
+                onClick={() =>
+                  setAttackSelections((prev) => ({
+                    ...prev,
+                    [option.key]: !prev[option.key],
+                  }))
+                }
+                style={{
+                  textAlign: 'left',
+                  borderRadius: 12,
+                  border: selected
+                    ? '1px solid rgba(251,113,133,0.45)'
+                    : '1px solid rgba(255,255,255,0.08)',
+                  background: selected ? 'rgba(244,63,94,0.10)' : 'rgba(255,255,255,0.02)',
+                  padding: 12,
+                  color: '#f5f5f5',
+                  cursor: 'pointer',
+                }}
+              >
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                  <Dot color={selected ? '#fb7185' : '#737373'} size={7} />
+                  <span style={{ fontSize: 13, fontWeight: 600 }}>{option.label}</span>
                 </div>
-                <div style={{ fontSize: 11, color: "#525252", lineHeight: 1.4 }}>{a.desc}</div>
-                {a.owasp !== "—" && (
-                  <div style={{ marginTop: 8, fontSize: 10, color: "#3f3f3f" }}>OWASP LLM {a.owasp}</div>
-                )}
-                {/* Mini gradient bar */}
-                <div style={{ marginTop: 10, height: 3, borderRadius: 2, background: "rgba(255,255,255,0.04)", overflow: "hidden" }}>
-                  <div style={{ height: "100%", borderRadius: 2, background: checked ? a.gradient : "rgba(255,255,255,0.04)", width: "100%", opacity: checked ? 0.7 : 0.2, transition: "opacity 0.3s" }} />
-                </div>
-              </div>
+              </button>
             );
           })}
         </div>
       </div>
 
-      {/* ── Blue team agents (visible when adversarial or blue_team) ── */}
-      {(mode === "adversarial" || mode === "blue_team") && (
-        <div style={{ borderRadius: 16, border: "1px solid rgba(255,255,255,0.06)", background: "linear-gradient(135deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01))", padding: "20px", marginBottom: 20 }}>
-          <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.2em", color: "#525252", marginBottom: 16 }}>Blue team agents <span style={{ color: "#34d399" }}>• all active</span></div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 12 }}>
-            {defenseAgents.map((d) => (
-              <div key={d.label} style={{ borderRadius: 12, padding: "14px 16px", border: "1px solid rgba(52,211,153,0.15)", background: "rgba(52,211,153,0.04)" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-                  <Dot color="#34d399" size={6} />
-                  <span style={{ fontSize: 13, fontWeight: 600, color: "#a3a3a3" }}>{d.label}</span>
-                </div>
-                <div style={{ fontSize: 11, color: "#525252" }}>{d.desc}</div>
-              </div>
-            ))}
+      <div style={panelStyle}>
+        <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 13, color: '#d4d4d4' }}>
+          <input
+            type="checkbox"
+            checked={autoStart}
+            onChange={(e) => setAutoStart(e.target.checked)}
+          />
+          Auto-start scan after creation
+        </label>
+
+        <div style={{ marginTop: 14 }}>
+          <button
+            type="button"
+            disabled={submitting}
+            onClick={handleSubmit}
+            style={primaryButtonStyle(submitting)}
+          >
+            {submitting ? 'Submitting...' : autoStart ? 'Create + Start Scan' : 'Create Scan'}
+          </button>
+        </div>
+      </div>
+
+      {createdScan && (
+        <div style={panelStyle}>
+          <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>Latest Scan</div>
+          <div style={{ fontSize: 12, color: '#d4d4d4', lineHeight: 1.8 }}>
+            <div>ID: {createdScan.id}</div>
+            <div>Status: {createdScan.status}</div>
+            <div>Mode: {createdScan.mode}</div>
+            <div>Target: {createdScan.target_endpoint}</div>
           </div>
         </div>
       )}
-
-      {/* ── Start scan ── */}
-      <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-        <button style={{
-          height: 48, borderRadius: 12, padding: "0 32px", fontSize: 14, fontWeight: 600, cursor: "pointer",
-          border: "1px solid rgba(217,70,239,0.3)",
-          background: "linear-gradient(135deg, rgba(217,70,239,0.2), rgba(139,92,246,0.12))",
-          color: "#e9d5ff",
-          boxShadow: "0 0 24px rgba(217,70,239,0.15), 0 4px 16px rgba(0,0,0,0.3)",
-        }}>Start scan</button>
-        <span style={{ fontSize: 12, color: "#3f3f3f" }}>Estimated: ~3 min · {Object.values(attacks).filter(Boolean).length} attack agents · {mode === "adversarial" ? "4 defense agents" : mode === "blue_team" ? "4 defense agents" : "no defense"}</span>
-      </div>
-    </>
+    </div>
   );
+}
+
+const panelStyle = {
+  borderRadius: 14,
+  border: '1px solid rgba(255,255,255,0.06)',
+  background: 'linear-gradient(135deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01))',
+  padding: 16,
 };
 
-export default NewScanContent;
+const sectionTitle = {
+  fontSize: 10,
+  letterSpacing: '0.16em',
+  textTransform: 'uppercase',
+  color: '#737373',
+  marginBottom: 12,
+};
+
+const inputStyle = {
+  flex: 1,
+  minWidth: 280,
+  borderRadius: 10,
+  border: '1px solid rgba(255,255,255,0.10)',
+  background: 'rgba(255,255,255,0.03)',
+  color: '#f5f5f5',
+  height: 40,
+  padding: '0 12px',
+};
+
+const ghostButtonStyle = {
+  borderRadius: 10,
+  border: '1px solid rgba(255,255,255,0.12)',
+  background: 'rgba(255,255,255,0.03)',
+  color: '#d4d4d4',
+  height: 40,
+  padding: '0 14px',
+  cursor: 'pointer',
+};
+
+const primaryButtonStyle = (disabled) => ({
+  borderRadius: 10,
+  border: '1px solid rgba(16,185,129,0.35)',
+  background: disabled
+    ? 'rgba(255,255,255,0.04)'
+    : 'linear-gradient(135deg, rgba(16,185,129,0.18), rgba(59,130,246,0.14))',
+  color: disabled ? '#737373' : '#a7f3d0',
+  height: 42,
+  padding: '0 18px',
+  cursor: disabled ? 'not-allowed' : 'pointer',
+});

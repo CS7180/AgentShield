@@ -8,6 +8,7 @@ services:
       dockerfile: agents/Dockerfile
     environment:
       AGENTS_PORT: 8090
+      AGENTS_EXECUTION_MODE: ${AGENTS_EXECUTION_MODE:-simulate}
     ports:
       - "8090:8090"
     restart: unless-stopped
@@ -18,6 +19,10 @@ services:
       dockerfile: judge/Dockerfile
     environment:
       JUDGE_PORT: 8091
+      JUDGE_EVAL_MODE: ${JUDGE_EVAL_MODE:-rule}
+      JUDGE_LLM_BASE_URL: ${JUDGE_LLM_BASE_URL:-}
+      JUDGE_LLM_API_KEY: ${JUDGE_LLM_API_KEY:-}
+      JUDGE_LLM_MODEL: ${JUDGE_LLM_MODEL:-}
     ports:
       - "8091:8091"
     restart: unless-stopped
@@ -35,6 +40,8 @@ services:
     environment:
       ORCHESTRATOR_PORT: 50051
       ENVIRONMENT: development
+      KAFKA_BROKERS: kafka:9092
+      ORCHESTRATOR_SCAN_STATUS_TOPIC: ${ORCHESTRATOR_SCAN_STATUS_TOPIC:-agent.status}
       AGENTS_SERVICE_URL: http://agents:8090
       JUDGE_SERVICE_URL: http://judge:8091
     ports:
