@@ -1,151 +1,314 @@
-import React from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { getJudgeCalibrationReport, getScanReport, listScans } from './api/client';
+import useAuth from './auth/useAuth';
 
-const DashboardContent = () => {
-  const stats = [
-    { label: "TOTAL SCANS", value: "24", dot: "#c084fc" },
-    { label: "CRITICAL", value: "7", dot: "#fb7185" },
-    { label: "AVG DEFENSE", value: "89.2%", dot: "#34d399" },
-    { label: "JUDGE τ", value: "0.81", dot: "#c084fc" },
-  ];
+const ATTACK_TYPES = [
+  { key: 'prompt_injection', label: 'Prompt Injection' },
+  { key: 'jailbreak', label: 'Jailbreak' },
+  { key: 'data_leakage', label: 'Data Leakage' },
+  { key: 'constraint_drift', label: 'Constraint Drift' },
+];
 
-  const scans = [
-    { target: "DocMind API", endpoint: "api.docmind.dev/v1/chat", mode: "adversarial", modeTone: "purple", status: "done", score: "72.00", vulns: [{ l: "1C", t: "c" }, { l: "2H", t: "h" }] },
-    { target: "Chatbot v2.1", endpoint: "staging.chatbot.io/api", mode: "red team", modeTone: "red", status: "done", score: "45.00", vulns: [{ l: "3C", t: "c" }, { l: "4H", t: "h" }] },
-    { target: "Support Agent", endpoint: "support.acme.com/agent", mode: "blue team", modeTone: "blue", status: "running", score: "—", vulns: [{ l: "—", t: "n" }] },
-  ];
-
-  const coverage = [
-    { label: "#1 Injection", value: 85, gradient: "linear-gradient(90deg, #ef4444, #f97316, #ec4899)", glow: "rgba(239,68,68,0.25)" },
-    { label: "#2 Data leak", value: 70, gradient: "linear-gradient(90deg, #ec4899, #a855f7, #6366f1)", glow: "rgba(168,85,247,0.25)" },
-    { label: "#3 Jailbreak", value: 90, gradient: "linear-gradient(90deg, #8b5cf6, #6366f1, #3b82f6)", glow: "rgba(99,102,241,0.25)" },
-    { label: "#4 Constraint", value: 60, gradient: "linear-gradient(90deg, #6366f1, #3b82f6, #06b6d4)", glow: "rgba(59,130,246,0.25)" },
-  ];
-
-  const modeColor = { purple: ["rgba(139,92,246,0.15)", "rgba(139,92,246,0.4)", "#c4b5fd"], red: ["rgba(244,63,94,0.15)", "rgba(244,63,94,0.4)", "#fda4af"], blue: ["rgba(14,165,233,0.15)", "rgba(14,165,233,0.4)", "#7dd3fc"] };
-  const vulnColor = { c: ["rgba(244,63,94,0.12)", "rgba(251,113,133,0.35)", "#fb7185"], h: ["rgba(245,158,11,0.12)", "rgba(251,191,36,0.35)", "#fbbf24"], n: ["transparent", "rgba(255,255,255,0.08)", "#525252"] };
-
-  const Pill = ({ bg, border, color, children }) => (
-    <span style={{ display: "inline-flex", alignItems: "center", gap: "6px", padding: "4px 12px", borderRadius: "20px", fontSize: "11px", fontWeight: 500, background: bg, border: `1px solid ${border}`, color }}>{children}</span>
+function Dot({ color, size = 7 }) {
+  return (
+    <span
+      style={{
+        height: size,
+        width: size,
+        borderRadius: '50%',
+        background: color,
+        boxShadow: `0 0 10px ${color}`,
+        flexShrink: 0,
+      }}
+    />
   );
+}
 
-  const Dot = ({ color, size = 7, shadow = true }) => (
-    <span style={{ height: size, width: size, borderRadius: "50%", background: color, boxShadow: shadow ? `0 0 10px ${color}` : "none", flexShrink: 0 }} />
-  );
+function formatScore(value) {
+  if (typeof value !== 'number') return 'N/A';
+  return value.toFixed(2);
+}
+
+function statusTone(status) {
+  switch (status) {
+    case 'completed':
+      return '#34d399';
+    case 'running':
+      return '#fbbf24';
+    case 'failed':
+      return '#fb7185';
+    case 'stopped':
+      return '#a3a3a3';
+    default:
+      return '#737373';
+  }
+}
+
+function parseScorecard(raw) {
+  if (!raw) return null;
+  if (typeof raw === 'object') return raw;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+export default function DashboardContent() {
+  const navigate = useNavigate();
+  const { session } = useAuth();
+  const token = session?.access_token;
+
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [scans, setScans] = useState([]);
+  const [reportsByScanID, setReportsByScanID] = useState({});
+  const [judgeTau, setJudgeTau] = useState(null);
+
+  useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+
+    async function load() {
+      setLoading(true);
+      setError('');
+      try {
+        const scansResp = await listScans(token, { limit: 100, offset: 0 });
+        const orderedScans = [...(scansResp.scans || [])].sort(
+          (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+        );
+
+        const reportEntries = await Promise.all(
+          orderedScans.slice(0, 20).map(async (scan) => {
+            try {
+              const report = await getScanReport(scan.id, token);
+              return [scan.id, report];
+            } catch {
+              return [scan.id, null];
+            }
+          }),
+        );
+
+        let nextJudgeTau = null;
+        try {
+          const judge = await getJudgeCalibrationReport(token);
+          if (typeof judge?.kendall_tau === 'number') {
+            nextJudgeTau = judge.kendall_tau;
+          }
+        } catch {
+          nextJudgeTau = null;
+        }
+
+        if (cancelled) return;
+        setScans(orderedScans);
+        setReportsByScanID(Object.fromEntries(reportEntries));
+        setJudgeTau(nextJudgeTau);
+      } catch (err) {
+        if (cancelled) return;
+        setError(err.message || 'Failed to load dashboard data');
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    }
+
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
+
+  const stats = useMemo(() => {
+    const total = scans.length;
+
+    let critical = 0;
+    let scoreSum = 0;
+    let scoreCount = 0;
+    for (const scan of scans) {
+      const report = reportsByScanID[scan.id];
+      if (!report) continue;
+      critical += Number(report.critical_count || 0);
+      if (typeof report.overall_score === 'number') {
+        scoreSum += report.overall_score;
+        scoreCount += 1;
+      }
+    }
+
+    const avgDefense = scoreCount > 0 ? scoreSum / scoreCount : null;
+    return {
+      total,
+      critical,
+      avgDefense,
+      judgeTau,
+    };
+  }, [scans, reportsByScanID, judgeTau]);
+
+  const recentScans = useMemo(() => scans.slice(0, 6), [scans]);
+
+  const coverage = useMemo(() => {
+    const attempted = Object.fromEntries(ATTACK_TYPES.map((t) => [t.key, 0]));
+    const successful = Object.fromEntries(ATTACK_TYPES.map((t) => [t.key, 0]));
+
+    for (const scan of scans) {
+      const report = reportsByScanID[scan.id];
+      const scorecard = parseScorecard(report?.owasp_scorecard);
+
+      for (const attackType of scan.attack_types || []) {
+        if (!(attackType in attempted)) continue;
+        attempted[attackType] += 1;
+
+        if (scorecard && scorecard[attackType] && Number(scorecard[attackType].successful || 0) > 0) {
+          successful[attackType] += 1;
+        }
+      }
+    }
+
+    return ATTACK_TYPES.map((type) => {
+      const a = attempted[type.key];
+      const s = successful[type.key];
+      const value = a > 0 ? Math.round((s / a) * 100) : 0;
+      return { ...type, value, attempted: a, successful: s };
+    });
+  }, [scans, reportsByScanID]);
 
   return (
-    <>
-      {/* Header */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
-          <h1 style={{ fontSize: 26, fontWeight: 700, margin: 0, letterSpacing: "-0.02em" }}>Dashboard</h1>
-          <p style={{ fontSize: 12, color: "#3f3f3f", marginTop: 4 }}>Continuous red-team assessment across targets</p>
+          <h1 style={{ fontSize: 26, fontWeight: 700, margin: 0, letterSpacing: '-0.02em' }}>Dashboard</h1>
+          <p style={{ fontSize: 12, color: '#737373', marginTop: 6 }}>
+            Real-time scan summary from API data.
+          </p>
         </div>
-        <div style={{ display: "flex", gap: 10 }}>
-          <button style={{ borderRadius: 10, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.03)", padding: "8px 14px", fontSize: 12, color: "#737373", cursor: "pointer" }}>Filters</button>
-          <button style={{
+        <button
+          type="button"
+          onClick={() => navigate('/scans')}
+          style={{
             borderRadius: 10,
-            border: "1px solid rgba(217,70,239,0.25)",
-            background: "linear-gradient(135deg, rgba(217,70,239,0.15), rgba(139,92,246,0.08))",
-            padding: "8px 18px", fontSize: 12, color: "#e9d5ff", cursor: "pointer",
-            boxShadow: "0 0 20px rgba(217,70,239,0.12)",
-          }}>+ New scan</button>
+            border: '1px solid rgba(16,185,129,0.3)',
+            background: 'rgba(16,185,129,0.12)',
+            padding: '8px 16px',
+            color: '#6ee7b7',
+            cursor: 'pointer',
+          }}
+        >
+          + New Scan
+        </button>
+      </div>
+
+      {error && <div style={{ color: '#fb7185', fontSize: 12 }}>{error}</div>}
+      {loading && <div style={{ color: '#a3a3a3', fontSize: 12 }}>Loading dashboard...</div>}
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
+        <div style={cardStyle}>
+          <div style={metricLabel}>TOTAL SCANS</div>
+          <div style={metricValue}>{stats.total}</div>
+        </div>
+        <div style={cardStyle}>
+          <div style={metricLabel}>CRITICAL FINDINGS</div>
+          <div style={{ ...metricValue, color: '#fb7185' }}>{stats.critical}</div>
+        </div>
+        <div style={cardStyle}>
+          <div style={metricLabel}>AVG DEFENSE SCORE</div>
+          <div style={{ ...metricValue, color: '#34d399' }}>
+            {stats.avgDefense == null ? 'N/A' : `${stats.avgDefense.toFixed(2)}%`}
+          </div>
+        </div>
+        <div style={cardStyle}>
+          <div style={metricLabel}>JUDGE TAU</div>
+          <div style={metricValue}>{stats.judgeTau == null ? 'N/A' : stats.judgeTau.toFixed(2)}</div>
         </div>
       </div>
 
-      {/* ── Stat cards ── */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14, marginBottom: 24 }}>
-        {stats.map((s) => (
-          <div key={s.label} style={{
-            borderRadius: 16, padding: "20px",
-            border: "1px solid rgba(255,255,255,0.06)",
-            background: "linear-gradient(135deg, rgba(255,255,255,0.035), rgba(255,255,255,0.015))",
-            backdropFilter: "blur(8px)",
-            position: "relative", overflow: "hidden",
-          }}>
-            <div style={{ position: "absolute", top: 16, right: 16 }}><Dot color={s.dot} size={8} /></div>
-            <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.2em", color: "#525252" }}>{s.label}</div>
-            <div style={{ marginTop: 12, fontSize: 34, fontWeight: 700, letterSpacing: "-0.03em", color: s.dot === "#fb7185" ? "#fb7185" : s.dot === "#34d399" ? "#34d399" : "#fff" }}>{s.value}</div>
-          </div>
-        ))}
-      </div>
-
-      {/* ── Recent scans ── */}
-      <div style={{
-        borderRadius: 16, border: "1px solid rgba(255,255,255,0.06)",
-        background: "linear-gradient(135deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01))",
-        overflow: "hidden", marginBottom: 24,
-      }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 20px", borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
-          <div>
-            <div style={{ fontSize: 14, fontWeight: 600 }}>Recent scans</div>
-            <div style={{ fontSize: 11, color: "#3f3f3f", marginTop: 2 }}>Continuous red-team assessment across targets</div>
-          </div>
-          <div style={{ fontSize: 11, color: "#3f3f3f" }}>Last updated 2 min ago</div>
-        </div>
-
-        {scans.map((scan, idx) => (
-          <div key={scan.target} style={{
-            padding: "18px 20px",
-            borderBottom: idx < scans.length - 1 ? "1px solid rgba(255,255,255,0.04)" : "none",
-            display: "flex", justifyContent: "space-between", alignItems: "center",
-          }}>
-            <div style={{ flex: "1 1 0" }}>
-              <div style={{ fontSize: 15, fontWeight: 600 }}>{scan.target}</div>
-              <div style={{ fontSize: 11, color: "#3f3f3f", marginTop: 3 }}>{scan.endpoint}</div>
-              <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
-                <Pill bg={modeColor[scan.modeTone][0]} border={modeColor[scan.modeTone][1]} color={modeColor[scan.modeTone][2]}>{scan.mode}</Pill>
-                <Pill bg={scan.status === "done" ? "rgba(52,211,153,0.12)" : "rgba(251,191,36,0.12)"} border={scan.status === "done" ? "rgba(52,211,153,0.35)" : "rgba(251,191,36,0.35)"} color={scan.status === "done" ? "#34d399" : "#fbbf24"}>
-                  <Dot color={scan.status === "done" ? "#34d399" : "#fbbf24"} size={6} />{scan.status}
-                </Pill>
-                {scan.vulns.map((v) => (
-                  <Pill key={v.l} bg={vulnColor[v.t][0]} border={vulnColor[v.t][1]} color={vulnColor[v.t][2]}>{v.l}</Pill>
-                ))}
+      <div style={panelStyle}>
+        <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>Recent Scans</div>
+        {recentScans.length === 0 && <div style={{ color: '#737373', fontSize: 12 }}>No scans found.</div>}
+        {recentScans.map((scan) => {
+          const report = reportsByScanID[scan.id];
+          const tone = statusTone(scan.status);
+          return (
+            <div
+              key={scan.id}
+              style={{
+                padding: '12px 10px',
+                borderBottom: '1px solid rgba(255,255,255,0.05)',
+                display: 'grid',
+                gridTemplateColumns: '1.8fr 1fr 1fr 0.8fr',
+                gap: 10,
+                alignItems: 'center',
+              }}
+            >
+              <div>
+                <div style={{ fontSize: 13, color: '#f5f5f5' }}>{scan.target_endpoint}</div>
+                <div style={{ fontSize: 11, color: '#737373', marginTop: 4 }}>{scan.id}</div>
+              </div>
+              <div style={{ fontSize: 12, color: '#d4d4d4' }}>{scan.mode}</div>
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: tone, fontSize: 12 }}>
+                <Dot color={tone} size={6} />
+                {scan.status}
+              </div>
+              <div style={{ textAlign: 'right', fontSize: 12, color: '#e5e5e5' }}>
+                {formatScore(report?.overall_score)}
               </div>
             </div>
-            <div style={{ textAlign: "right", flexShrink: 0, marginLeft: 20 }}>
-              <div style={{ fontSize: 28, fontWeight: 700, letterSpacing: "-0.03em" }}>{scan.score}</div>
-              <div style={{ fontSize: 10, color: "#3f3f3f", marginTop: 2 }}>judge score</div>
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
-      {/* ── OWASP coverage ── */}
-      <div style={{
-        borderRadius: 16, border: "1px solid rgba(255,255,255,0.06)",
-        background: "linear-gradient(135deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01))",
-        padding: "20px",
-      }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 20 }}>
-          <div>
-            <div style={{ fontSize: 14, fontWeight: 600 }}>OWASP LLM Top 10</div>
-            <div style={{ fontSize: 11, color: "#3f3f3f", marginTop: 2 }}>Detection coverage by attack class</div>
-          </div>
-          <div style={{ fontSize: 11, color: "#525252" }}>Coverage</div>
-        </div>
-
-        <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      <div style={panelStyle}>
+        <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>Attack Success Coverage</div>
+        <div style={{ display: 'grid', gap: 10 }}>
           {coverage.map((item) => (
-            <div key={item.label}>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8, fontSize: 13 }}>
-                <span style={{ color: "#a3a3a3", fontWeight: 500 }}>{item.label}</span>
-                <span style={{ color: "#737373", fontWeight: 500 }}>{item.value}%</span>
+            <div key={item.key}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 6 }}>
+                <span style={{ color: '#d4d4d4' }}>{item.label}</span>
+                <span style={{ color: '#a3a3a3' }}>
+                  {item.value}% ({item.successful}/{item.attempted})
+                </span>
               </div>
-              <div style={{ height: 10, borderRadius: 5, background: "rgba(255,255,255,0.04)", overflow: "hidden" }}>
-                <div style={{
-                  height: "100%", borderRadius: 5,
-                  background: item.gradient,
-                  width: `${item.value}%`,
-                  boxShadow: `0 0 16px ${item.glow}, 0 2px 8px ${item.glow}`,
-                  transition: "width 0.8s ease",
-                }} />
+              <div style={{ height: 8, borderRadius: 6, background: 'rgba(255,255,255,0.06)', overflow: 'hidden' }}>
+                <div
+                  style={{
+                    height: '100%',
+                    width: `${item.value}%`,
+                    background: 'linear-gradient(90deg, #22c55e, #06b6d4)',
+                    transition: 'width 0.4s ease',
+                  }}
+                />
               </div>
             </div>
           ))}
         </div>
       </div>
-    </>
+    </div>
   );
+}
+
+const cardStyle = {
+  borderRadius: 14,
+  border: '1px solid rgba(255,255,255,0.06)',
+  background: 'linear-gradient(135deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01))',
+  padding: 16,
 };
 
-export default DashboardContent;
+const metricLabel = {
+  fontSize: 10,
+  letterSpacing: '0.15em',
+  color: '#737373',
+};
+
+const metricValue = {
+  fontSize: 28,
+  fontWeight: 700,
+  letterSpacing: '-0.03em',
+  marginTop: 8,
+};
+
+const panelStyle = {
+  borderRadius: 14,
+  border: '1px solid rgba(255,255,255,0.06)',
+  background: 'linear-gradient(135deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01))',
+  padding: 16,
+};

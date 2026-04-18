@@ -76,6 +76,9 @@ func run() error {
 	// ── Repositories ────────────────────────────────────────────────────────────
 	scanRepo := pgrepo.NewScanRepository(pool)
 	reportRepo := pgrepo.NewReportRepository(pool)
+	attackResultRepo := pgrepo.NewAttackResultRepository(pool)
+	deadLetterRepo := pgrepo.NewScanDeadLetterRepository(pool)
+	judgeCalibrationRepo := pgrepo.NewJudgeCalibrationRepository(pool)
 	ownershipAdapter := pgrepo.NewOwnershipAdapter(scanRepo)
 
 	// ── Storage ─────────────────────────────────────────────────────────────────
@@ -148,8 +151,18 @@ func run() error {
 
 	// Authenticated API routes
 	scanHandler := handler.NewScanHandler(scanRepo, orchClient, logger)
+	attackResultHandler := handler.NewAttackResultHandler(attackResultRepo, logger)
+	deadLetterHandler := handler.NewDeadLetterHandler(deadLetterRepo, logger)
 	reportHandler := handler.NewReportHandler(reportRepo, reportUploader, cfg.Supabase.ReportsBucket, logger)
-	judgeHandler := handler.NewJudgeHandler()
+	reportGenerationHandler := handler.NewReportGenerationHandler(
+		reportRepo,
+		attackResultRepo,
+		scanRepo,
+		reportUploader,
+		cfg.Supabase.ReportsBucket,
+		logger,
+	)
+	judgeHandler := handler.NewJudgeHandler(judgeCalibrationRepo)
 
 	globalRateLimit := middleware.GlobalRateLimit(redisClient)
 	scanCreateRateLimit := middleware.ScanCreateRateLimit(redisClient)
@@ -165,9 +178,13 @@ func run() error {
 			scans.GET("/:id", ownership, scanHandler.Get)
 			scans.POST("/:id/start", ownership, scanHandler.Start)
 			scans.POST("/:id/stop", ownership, scanHandler.Stop)
+			scans.POST("/:id/attack-results", ownership, attackResultHandler.CreateBatch)
+			scans.GET("/:id/attack-results", ownership, attackResultHandler.List)
+			scans.GET("/:id/dead-letters", ownership, deadLetterHandler.List)
 			scans.PUT("/:id/report", ownership, reportHandler.Upsert)
 			scans.GET("/:id/report", ownership, reportHandler.GetJSON)
 			scans.GET("/:id/report/pdf", ownership, reportHandler.GetPDF)
+			scans.POST("/:id/report/generate", ownership, reportGenerationHandler.Generate)
 			scans.GET("/:id/compare/:other_id", ownership, reportHandler.Compare)
 		}
 

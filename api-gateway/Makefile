@@ -1,4 +1,4 @@
-.PHONY: build run test proto tidy lint docker-up docker-down
+.PHONY: build run test test-verbose coverage coverage-check proto tidy lint docker-up docker-down orchestrator-run agents-run judge-run
 
 # ── Build ─────────────────────────────────────────────────────────────────────
 build:
@@ -7,12 +7,34 @@ build:
 run:
 	go run ./cmd/server
 
+orchestrator-run:
+	cd ../orchestrator && go run ./cmd/server
+
+agents-run:
+	cd ../agents && go run ./cmd/server
+
+judge-run:
+	cd ../judge && go run ./cmd/server
+
 # ── Test ──────────────────────────────────────────────────────────────────────
 test:
 	go test -race -cover ./...
 
 test-verbose:
 	go test -v -race -cover ./...
+
+coverage:
+	go test ./... -coverprofile=coverage.out
+	go tool cover -func=coverage.out | tail -n 1
+
+# Baseline quality gate (override with `COVERAGE_MIN=<n>` in CI/local).
+coverage-check:
+	@min=$${COVERAGE_MIN:-25}; \
+	go test ./... -coverprofile=coverage.out >/tmp/agentshield_apigw_cover.log; \
+	total=$$(go tool cover -func=coverage.out | awk '/^total:/{gsub("%","",$$3); print $$3}'); \
+	echo "Total coverage: $${total}% (required: $${min}%)"; \
+	awk "BEGIN { exit !($${total} >= $${min}) }" || (echo "coverage gate failed"; rm -f coverage.out; exit 1); \
+	rm -f coverage.out
 
 # ── Dependencies ──────────────────────────────────────────────────────────────
 tidy:

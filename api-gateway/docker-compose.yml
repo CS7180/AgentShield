@@ -1,9 +1,56 @@
-version: "3.9"
-
-# Local dev stack: Redis + Kafka (DB = Supabase cloud).
+# Local dev stack: agents + judge + orchestrator + API gateway + Redis + Kafka (DB = Supabase cloud).
 # Copy .env.example → .env and fill in SUPABASE_JWT_SECRET + DATABASE_URL before running.
 
 services:
+  agents:
+    build:
+      context: ..
+      dockerfile: agents/Dockerfile
+    environment:
+      AGENTS_PORT: 8090
+      AGENTS_EXECUTION_MODE: ${AGENTS_EXECUTION_MODE:-simulate}
+    ports:
+      - "8090:8090"
+    restart: unless-stopped
+
+  judge:
+    build:
+      context: ..
+      dockerfile: judge/Dockerfile
+    environment:
+      JUDGE_PORT: 8091
+      JUDGE_EVAL_MODE: ${JUDGE_EVAL_MODE:-rule}
+      JUDGE_LLM_BASE_URL: ${JUDGE_LLM_BASE_URL:-}
+      JUDGE_LLM_API_KEY: ${JUDGE_LLM_API_KEY:-}
+      JUDGE_LLM_MODEL: ${JUDGE_LLM_MODEL:-}
+    ports:
+      - "8091:8091"
+    restart: unless-stopped
+
+  orchestrator:
+    build:
+      context: ..
+      dockerfile: orchestrator/Dockerfile
+    env_file: .env
+    depends_on:
+      agents:
+        condition: service_started
+      judge:
+        condition: service_started
+    environment:
+      ORCHESTRATOR_PORT: 50051
+      ENVIRONMENT: development
+      KAFKA_BROKERS: kafka:9092
+      ORCHESTRATOR_SCAN_STATUS_TOPIC: ${ORCHESTRATOR_SCAN_STATUS_TOPIC:-agent.status}
+      ORCHESTRATOR_EXEC_MAX_ATTEMPTS: ${ORCHESTRATOR_EXEC_MAX_ATTEMPTS:-3}
+      ORCHESTRATOR_EXEC_RETRY_BASE_MS: ${ORCHESTRATOR_EXEC_RETRY_BASE_MS:-1000}
+      ORCHESTRATOR_EXEC_RETRY_MAX_MS: ${ORCHESTRATOR_EXEC_RETRY_MAX_MS:-8000}
+      AGENTS_SERVICE_URL: http://agents:8090
+      JUDGE_SERVICE_URL: http://judge:8091
+    ports:
+      - "50051:50051"
+    restart: unless-stopped
+
   redis:
     image: redis:7-alpine
     ports:
@@ -49,11 +96,16 @@ services:
   api-gateway:
     build: .
     depends_on:
+      orchestrator:
+        condition: service_started
       redis:
         condition: service_healthy
       kafka:
         condition: service_healthy
     env_file: .env
+    environment:
+      ORCHESTRATOR_ENABLED: "true"
+      ORCHESTRATOR_ADDR: orchestrator:50051
     ports:
       - "8080:8080"
     restart: unless-stopped
