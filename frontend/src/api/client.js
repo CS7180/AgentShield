@@ -14,6 +14,8 @@ async function request(path, options) {
     const err = new Error(body.error ?? `HTTP ${res.status}`);
     err.code = body.code;
     err.status = res.status;
+    err.isAuthError = res.status === 401 || res.status === 403;
+    err.isGatewayError = res.status >= 500;
     throw err;
   }
   return body;

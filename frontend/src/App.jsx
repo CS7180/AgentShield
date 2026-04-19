@@ -9,6 +9,7 @@ import SettingsContent from './SettingsContent';
 import LandingPage from './LandingPage';
 import LoginPage from './LoginPage';
 import ProtectedRoute from './auth/ProtectedRoute';
+import AuthCallback from './auth/AuthCallback';
 import useAuth from './auth/useAuth';
 
 const routeIndexByPath = {
@@ -60,6 +61,7 @@ function App() {
     <Routes>
       <Route path="/" element={<MarketingEntry />} />
       <Route path="/login" element={<LoginRoute />} />
+      <Route path="/auth/callback" element={<AuthCallback />} />
       <Route element={<ProtectedRoute />}>
         <Route element={<AppShell />}>
           <Route path="/dashboard" element={<DashboardContent />} />
