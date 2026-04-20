@@ -1,3 +1,4 @@
+import React from 'react';
 import { Navigate, Outlet, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import Layout from './Layout';
 import DashboardContent from './DashboardContent';

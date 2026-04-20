@@ -1,3 +1,4 @@
+import React from 'react';
 import { useEffect, useMemo, useState } from 'react';
 import { API_BASE, listScans } from './api/client';
 import useAuth from './auth/useAuth';
