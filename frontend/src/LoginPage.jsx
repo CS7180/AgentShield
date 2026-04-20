@@ -1,10 +1,12 @@
+import React from 'react';
 import { useLocation, Link } from 'react-router-dom';
 import useAuth from './auth/useAuth';
 import { useState } from 'react';
+import { supabaseConfigStatus } from './lib/supabase';
 
 export default function LoginPage() {
   const location = useLocation();
-  const { signInWithGoogle, isConfigured, loading } = useAuth();
+  const { signInWithGoogle, isConfigured, loading, authError } = useAuth();
   const [submitting, setSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
 
@@ -20,7 +22,7 @@ export default function LoginPage() {
     setSubmitting(true);
     setErrorMessage('');
 
-    const redirectTo = `${window.location.origin}${from}`;
+    const redirectTo = `${window.location.origin}/auth/callback?next=${encodeURIComponent(from)}`;
     const { error } = await signInWithGoogle({ redirectTo });
 
     if (error) {
@@ -81,6 +83,11 @@ export default function LoginPage() {
               <div style={{ fontSize: 13, color: '#d1d5db', lineHeight: 1.6 }}>
                 Create `frontend/.env.local` from `frontend/.env.example`, then paste your Supabase project URL and anon key.
               </div>
+              <div style={{ fontSize: 12, color: '#fcd34d', marginTop: 10, lineHeight: 1.6 }}>
+                Missing:
+                {' '}
+                {supabaseConfigStatus.missingKeys.join(', ') || 'Unknown config values'}
+              </div>
             </div>
           )}
 
@@ -121,6 +128,23 @@ export default function LoginPage() {
               }}
             >
               {errorMessage}
+            </div>
+          )}
+
+          {!errorMessage && authError && (
+            <div
+              style={{
+                marginBottom: 16,
+                borderRadius: 12,
+                background: 'rgba(244,63,94,0.08)',
+                border: '1px solid rgba(251,113,133,0.16)',
+                color: '#fda4af',
+                padding: '12px 14px',
+                fontSize: 13,
+                lineHeight: 1.5,
+              }}
+            >
+              {authError}
             </div>
           )}
 

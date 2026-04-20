@@ -1,3 +1,4 @@
+import React from 'react';
 import { useMemo, useState } from 'react';
 import { calibrateJudge, getJudgeCalibrationReport } from './api/client';
 import useAuth from './auth/useAuth';

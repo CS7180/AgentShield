@@ -1,4 +1,5 @@
 import React from 'react';
+import useAuth from './auth/useAuth';
 
 function Dot({ color, size = 7 }) {
   return (
@@ -23,6 +24,18 @@ const statusItems = [
 ];
 
 const Sidebar = ({ activeIndex, onNavigate }) => {
+  const { user, signOut } = useAuth();
+
+  async function handleSignOut() {
+    const { error } = await signOut();
+    if (error) {
+      console.error('Failed to sign out', error);
+      return;
+    }
+
+    window.location.assign('/');
+  }
+
   return (
     <aside
       style={{
@@ -87,6 +100,39 @@ const Sidebar = ({ activeIndex, onNavigate }) => {
       </nav>
 
       <div style={{ marginTop: 'auto', borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: 20 }}>
+        <div
+          style={{
+            marginBottom: 18,
+            padding: '12px 14px',
+            borderRadius: 12,
+            border: '1px solid rgba(255,255,255,0.06)',
+            background: 'rgba(255,255,255,0.02)',
+          }}
+        >
+          <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.16em', color: '#525252' }}>
+            Signed in as
+          </div>
+          <div style={{ fontSize: 13, color: '#e5e5e5', marginTop: 8, wordBreak: 'break-word' }}>
+            {user?.email ?? 'Authenticated user'}
+          </div>
+          <button
+            type="button"
+            onClick={handleSignOut}
+            style={{
+              marginTop: 12,
+              width: '100%',
+              borderRadius: 10,
+              border: '1px solid rgba(255,255,255,0.12)',
+              background: 'rgba(255,255,255,0.03)',
+              color: '#d4d4d4',
+              height: 38,
+              cursor: 'pointer',
+            }}
+          >
+            Sign out
+          </button>
+        </div>
+
         <div style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.2em', color: '#3f3f3f', marginBottom: 14 }}>
           System status
         </div>

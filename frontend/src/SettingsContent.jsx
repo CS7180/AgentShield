@@ -1,7 +1,8 @@
+import React from 'react';
 import { useEffect, useMemo, useState } from 'react';
 import { API_BASE, listScans } from './api/client';
 import useAuth from './auth/useAuth';
-import { isSupabaseConfigured } from './lib/supabase';
+import { isSupabaseConfigured, supabaseConfigStatus } from './lib/supabase';
 
 function Dot({ color, size = 7 }) {
   return (
@@ -23,11 +24,13 @@ function tone(ok) {
 }
 
 export default function SettingsContent() {
-  const { session } = useAuth();
+  const { session, loading, authError } = useAuth();
   const token = session?.access_token;
 
   const [gatewayHealth, setGatewayHealth] = useState(null);
   const [apiAuthHealth, setAPIAuthHealth] = useState(null);
+  const [apiAuthMessage, setAPIAuthMessage] = useState('');
+  const [gatewayMessage, setGatewayMessage] = useState('');
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -35,21 +38,42 @@ export default function SettingsContent() {
 
     async function runChecks() {
       setError('');
+      setGatewayMessage('');
+      setAPIAuthMessage('');
       try {
         const res = await fetch(`${API_BASE}/health`);
         const ok = res.ok;
         if (!cancelled) {
           setGatewayHealth(ok);
+          setGatewayMessage(ok ? 'Gateway health endpoint responded successfully.' : `Gateway health check returned HTTP ${res.status}.`);
         }
       } catch {
         if (!cancelled) {
           setGatewayHealth(false);
+          setGatewayMessage('Failed to reach the gateway health endpoint.');
         }
+      }
+
+      if (loading) {
+        if (!cancelled) {
+          setAPIAuthHealth(null);
+          setAPIAuthMessage('Waiting for auth session to finish loading.');
+        }
+        return;
+      }
+
+      if (!isSupabaseConfigured) {
+        if (!cancelled) {
+          setAPIAuthHealth(false);
+          setAPIAuthMessage(`Missing Supabase env vars: ${supabaseConfigStatus.missingKeys.join(', ')}`);
+        }
+        return;
       }
 
       if (!token) {
         if (!cancelled) {
           setAPIAuthHealth(false);
+          setAPIAuthMessage(authError || 'No active Supabase session found.');
         }
         return;
       }
@@ -58,10 +82,16 @@ export default function SettingsContent() {
         await listScans(token, { limit: 1, offset: 0 });
         if (!cancelled) {
           setAPIAuthHealth(true);
+          setAPIAuthMessage('Authenticated API request succeeded.');
         }
       } catch (err) {
         if (!cancelled) {
           setAPIAuthHealth(false);
+          if (err.isAuthError) {
+            setAPIAuthMessage('Authenticated API request failed. The access token is missing, expired, or rejected by the backend.');
+          } else {
+            setAPIAuthMessage(err.message || 'Authenticated API check failed.');
+          }
           setError(err.message || 'Authenticated API check failed');
         }
       }
@@ -71,13 +101,13 @@ export default function SettingsContent() {
     return () => {
       cancelled = true;
     };
-  }, [token]);
+  }, [token, loading, authError]);
 
   const wsBase = useMemo(() => API_BASE.replace(/^http/, 'ws'), []);
 
   const checklist = [
     { label: 'Supabase frontend config', ok: isSupabaseConfigured },
-    { label: 'Current user session', ok: Boolean(token) },
+    { label: 'Current user session', ok: Boolean(token) && !loading },
     { label: 'Gateway health endpoint', ok: gatewayHealth === true },
     { label: 'Authenticated API access', ok: apiAuthHealth === true },
   ];
@@ -106,7 +136,13 @@ export default function SettingsContent() {
             Supabase configured: <code>{String(isSupabaseConfigured)}</code>
           </div>
           <div>
+            Missing Supabase keys: <code>{supabaseConfigStatus.missingKeys.join(', ') || 'None'}</code>
+          </div>
+          <div>
             Access token present: <code>{String(Boolean(token))}</code>
+          </div>
+          <div>
+            Auth loading: <code>{String(loading)}</code>
           </div>
         </div>
       </div>
@@ -139,6 +175,26 @@ export default function SettingsContent() {
       </div>
 
       <div style={panelStyle}>
+        <div style={sectionTitle}>Detailed Status</div>
+        <div style={{ display: 'grid', gap: 10 }}>
+          <div style={detailCardStyle}>
+            <div style={detailLabelStyle}>Gateway</div>
+            <div style={detailMessageStyle}>{gatewayMessage || 'Health check has not run yet.'}</div>
+          </div>
+          <div style={detailCardStyle}>
+            <div style={detailLabelStyle}>Authenticated API</div>
+            <div style={detailMessageStyle}>{apiAuthMessage || 'Authenticated API check has not run yet.'}</div>
+          </div>
+          {authError && (
+            <div style={detailCardStyle}>
+              <div style={detailLabelStyle}>Auth Provider</div>
+              <div style={detailMessageStyle}>{authError}</div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div style={panelStyle}>
         <div style={sectionTitle}>Integration Notes</div>
         <div style={{ display: 'grid', gap: 6, fontSize: 12, color: '#a3a3a3', lineHeight: 1.7 }}>
           <div>Use `AGENTS_EXECUTION_MODE=target_http` to send attacks to target endpoint directly.</div>
@@ -163,4 +219,23 @@ const sectionTitle = {
   textTransform: 'uppercase',
   color: '#737373',
   marginBottom: 12,
+};
+
+const detailCardStyle = {
+  borderRadius: 10,
+  border: '1px solid rgba(255,255,255,0.07)',
+  background: 'rgba(255,255,255,0.02)',
+  padding: '10px 12px',
+};
+
+const detailLabelStyle = {
+  fontSize: 11,
+  color: '#a3a3a3',
+  marginBottom: 6,
+};
+
+const detailMessageStyle = {
+  fontSize: 12,
+  color: '#d4d4d4',
+  lineHeight: 1.6,
 };
