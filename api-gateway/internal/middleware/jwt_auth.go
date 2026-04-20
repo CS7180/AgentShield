@@ -7,12 +7,13 @@ import (
 
 	"github.com/agentshield/api-gateway/internal/auth"
 	"github.com/gin-gonic/gin"
+	"github.com/golang-jwt/jwt/v5"
 )
 
 const UserIDKey = "user_id"
 const UserEmailKey = "user_email"
 
-func JWTAuth(jwtSecret []byte) gin.HandlerFunc {
+func JWTAuth(keyFunc jwt.Keyfunc) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authHeader := c.GetHeader("Authorization")
 		if authHeader == "" {
@@ -26,7 +27,7 @@ func JWTAuth(jwtSecret []byte) gin.HandlerFunc {
 			return
 		}
 
-		claims, err := auth.ParseSupabaseToken(parts[1], jwtSecret)
+		claims, err := auth.ParseSupabaseTokenWithKeyFunc(parts[1], keyFunc)
 		if err != nil {
 			abortUnauthorized(c, "invalid token: "+err.Error())
 			return

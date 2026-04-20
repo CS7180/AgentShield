@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/agentshield/api-gateway/internal/auth"
 	"github.com/agentshield/api-gateway/internal/config"
 	"github.com/agentshield/api-gateway/internal/handler"
 	"github.com/agentshield/api-gateway/internal/kafka"
@@ -117,9 +118,9 @@ func run() error {
 		logger.Warn("kafka consumer group init failed, WebSocket feed disabled", zap.Error(err))
 	} else {
 		kafkaCtx, kafkaCancel := context.WithCancel(ctx)
-		defer kafkaCancel()
+		defer consumerGroup.Close() // runs second: close after context is cancelled
+		defer kafkaCancel()         // runs first: cancel context before closing
 		go consumerGroup.Run(kafkaCtx)
-		defer consumerGroup.Close()
 		logger.Info("kafka consumer group started", zap.Strings("brokers", cfg.Kafka.Brokers))
 	}
 
@@ -130,7 +131,7 @@ func run() error {
 
 	r := gin.New()
 
-	jwtSecret := []byte(cfg.Supabase.JWTSecret)
+	keyFunc := auth.JWKSKeyFunc(cfg.Supabase.URL)
 
 	// Global middleware
 	r.Use(
@@ -146,7 +147,7 @@ func run() error {
 	r.GET("/metrics", healthHandler.Metrics())
 
 	// WebSocket (auth via ?token= query param — jwt_auth middleware skipped here)
-	wsHandler := handler.NewWSHandler(hub, jwtSecret, logger)
+	wsHandler := handler.NewWSHandler(hub, keyFunc, logger)
 	r.GET("/ws/scans/:id/status", wsHandler.HandleScanStatus)
 
 	// Authenticated API routes
@@ -169,7 +170,7 @@ func run() error {
 	ownership := middleware.Ownership(ownershipAdapter)
 
 	api := r.Group("/api/v1")
-	api.Use(middleware.JWTAuth(jwtSecret), globalRateLimit)
+	api.Use(middleware.JWTAuth(keyFunc), globalRateLimit)
 	{
 		scans := api.Group("/scans")
 		{

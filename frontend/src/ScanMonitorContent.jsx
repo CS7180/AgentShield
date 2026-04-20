@@ -96,9 +96,11 @@ export default function ScanMonitorContent() {
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState('');
+  const [actionInfo, setActionInfo] = useState('');
 
   const wsRef = useRef(null);
   const autoReportAttemptRef = useRef({});
+  const initialLoadDoneRef = useRef('');
 
   useEffect(() => {
     if (!token) return;
@@ -128,24 +130,36 @@ export default function ScanMonitorContent() {
       cancelled = true;
       clearInterval(timer);
     };
-  }, [token, selectedScanID]);
+  }, [token]);
 
   useEffect(() => {
     if (!token || !selectedScanID) return;
     let cancelled = false;
 
     async function loadDetail() {
-      setLoading(true);
+      // Only show loading spinner on the first fetch for this scan selection.
+      const isFirstLoad = initialLoadDoneRef.current !== selectedScanID;
+      if (isFirstLoad) {
+        setLoading(true);
+        initialLoadDoneRef.current = selectedScanID;
+      }
       setError('');
       try {
-        const [scanResp, resultResp] = await Promise.all([
-          getScan(selectedScanID, token),
-          listAttackResults(selectedScanID, token, { limit: 200, offset: 0 }),
-        ]);
+        // Fetch scan and results independently so a missing-results 404
+        // does not prevent the scan itself from rendering.
+        const scanResp = await getScan(selectedScanID, token);
         if (cancelled) return;
-
         setScan(scanResp);
-        setResults(resultResp.results || []);
+
+        let fetchedResults = [];
+        try {
+          const resultResp = await listAttackResults(selectedScanID, token, { limit: 200, offset: 0 });
+          fetchedResults = resultResp.results || [];
+        } catch {
+          // results not yet available — keep previous value
+        }
+        if (cancelled) return;
+        setResults(fetchedResults);
 
         try {
           const deadLetterResp = await listScanDeadLetters(selectedScanID, token, { limit: 5, offset: 0 });
@@ -158,7 +172,7 @@ export default function ScanMonitorContent() {
           }
         }
 
-        const nextFeed = (resultResp.results || [])
+        const nextFeed = fetchedResults
           .slice()
           .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
           .slice(0, 20)
@@ -174,14 +188,16 @@ export default function ScanMonitorContent() {
           }));
         setFeed(nextFeed);
 
-        let report = null;
-        try {
-          report = await getScanReport(selectedScanID, token);
-        } catch {
-          report = null;
-        }
-
         const scanDone = ['completed', 'failed', 'stopped'].includes(scanResp.status);
+
+        let report = null;
+        if (scanDone) {
+          try {
+            report = await getScanReport(selectedScanID, token);
+          } catch {
+            report = null;
+          }
+        }
         const hasJSONPath = Boolean(report?.report_json_path);
         const hasPDFPath = Boolean(report?.report_pdf_path);
 
@@ -370,10 +386,17 @@ export default function ScanMonitorContent() {
     if (!scan || !token) return;
     setActionLoading(true);
     setError('');
+    setActionInfo('');
     try {
-      await startScan(scan.id, token);
+      const started = await startScan(scan.id, token);
       const refreshed = await getScan(scan.id, token);
       setScan(refreshed);
+      const msg = started.message || `Scan ${refreshed.status}.`;
+      if (refreshed.status === 'queued') {
+        setError(`Queued — orchestrator unavailable. Start the backend services to run the scan.`);
+      } else {
+        setActionInfo(msg);
+      }
     } catch (err) {
       setError(err.message || 'Failed to start scan');
     } finally {
@@ -485,6 +508,7 @@ export default function ScanMonitorContent() {
       </div>
 
       {error && <div style={{ color: '#fb7185', fontSize: 12 }}>{error}</div>}
+      {actionInfo && <div style={{ color: '#34d399', fontSize: 12 }}>{actionInfo}</div>}
       {loading && <div style={{ color: '#a3a3a3', fontSize: 12 }}>Loading scan data...</div>}
 
       <div style={panelStyle}>

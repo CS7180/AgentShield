@@ -23,7 +23,6 @@ type ServerConfig struct {
 }
 
 type SupabaseConfig struct {
-	JWTSecret      string `mapstructure:"SUPABASE_JWT_SECRET"`
 	URL            string `mapstructure:"SUPABASE_URL"`
 	ServiceRoleKey string `mapstructure:"SUPABASE_SERVICE_ROLE_KEY"`
 	ReportsBucket  string `mapstructure:"SUPABASE_REPORTS_BUCKET"`
@@ -72,11 +71,6 @@ func Load() (*Config, error) {
 	viper.SetDefault("ALLOWED_ORIGINS", "http://localhost:3000")
 	viper.SetDefault("SUPABASE_REPORTS_BUCKET", "agentshield-reports")
 
-	jwtSecret := viper.GetString("SUPABASE_JWT_SECRET")
-	if jwtSecret == "" {
-		return nil, fmt.Errorf("SUPABASE_JWT_SECRET is required")
-	}
-
 	dbURL := viper.GetString("DATABASE_URL")
 	if dbURL == "" {
 		return nil, fmt.Errorf("DATABASE_URL is required")
@@ -94,7 +88,6 @@ func Load() (*Config, error) {
 			Environment: viper.GetString("ENVIRONMENT"),
 		},
 		Supabase: SupabaseConfig{
-			JWTSecret:      jwtSecret,
 			URL:            viper.GetString("SUPABASE_URL"),
 			ServiceRoleKey: viper.GetString("SUPABASE_SERVICE_ROLE_KEY"),
 			ReportsBucket:  viper.GetString("SUPABASE_REPORTS_BUCKET"),

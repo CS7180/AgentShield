@@ -1,5 +1,6 @@
 import React from 'react';
 import { useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { createScan, startScan } from './api/client';
 import useAuth from './auth/useAuth';
 
@@ -55,6 +56,7 @@ function isValidHTTPS(url) {
 export default function NewScanContent() {
   const { session } = useAuth();
   const token = session?.access_token;
+  const navigate = useNavigate();
 
   const [targetEndpoint, setTargetEndpoint] = useState('');
   const [mode, setMode] = useState('red_team');
@@ -115,16 +117,21 @@ export default function NewScanContent() {
 
       let status = created.status;
       let message = 'Scan created.';
+
       if (autoStart) {
-        const started = await startScan(created.id, token);
-        status = started.status;
-        message = started.message || 'Scan created and start requested.';
+        try {
+          const started = await startScan(created.id, token);
+          status = started.status;
+          message = started.message || 'Scan created and start requested.';
+        } catch (startErr) {
+          setError(`Scan created (ID: ${created.id}) but failed to start: ${startErr.message}. You can retry from the Monitor.`);
+        }
       }
 
       setCreatedScan({ ...created, status });
-      setInfo(message);
+      if (!autoStart || !error) setInfo(message);
     } catch (err) {
-      setError(err.message || 'Failed to create/start scan.');
+      setError(err.message || 'Failed to create scan.');
     } finally {
       setSubmitting(false);
     }
@@ -171,16 +178,16 @@ export default function NewScanContent() {
                   textAlign: 'left',
                   borderRadius: 12,
                   border: selected
-                    ? '1px solid rgba(59,130,246,0.45)'
+                    ? '1px solid rgba(124,58,237,0.45)'
                     : '1px solid rgba(255,255,255,0.08)',
-                  background: selected ? 'rgba(59,130,246,0.12)' : 'rgba(255,255,255,0.02)',
+                  background: selected ? 'rgba(124,58,237,0.12)' : 'rgba(255,255,255,0.02)',
                   padding: 12,
                   color: '#f5f5f5',
                   cursor: 'pointer',
                 }}
               >
                 <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                  <Dot color={selected ? '#60a5fa' : '#737373'} size={7} />
+                  <Dot color={selected ? '#a78bfa' : '#737373'} size={7} />
                   <span style={{ fontSize: 13, fontWeight: 600 }}>{item.label}</span>
                 </div>
                 <div style={{ fontSize: 11, color: '#9ca3af' }}>{item.desc}</div>
@@ -258,6 +265,13 @@ export default function NewScanContent() {
             <div>Mode: {createdScan.mode}</div>
             <div>Target: {createdScan.target_endpoint}</div>
           </div>
+          <button
+            type="button"
+            onClick={() => navigate('/monitoring')}
+            style={{ ...ghostButtonStyle, marginTop: 12, fontSize: 12 }}
+          >
+            View in Monitor →
+          </button>
         </div>
       )}
     </div>
@@ -286,6 +300,7 @@ const inputStyle = {
   border: '1px solid rgba(255,255,255,0.10)',
   background: 'rgba(255,255,255,0.03)',
   color: '#f5f5f5',
+  fontSize: 13,
   height: 40,
   padding: '0 12px',
 };

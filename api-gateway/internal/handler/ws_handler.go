@@ -7,6 +7,7 @@ import (
 	"github.com/agentshield/api-gateway/internal/metrics"
 	"github.com/agentshield/api-gateway/internal/ws"
 	"github.com/gin-gonic/gin"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/gorilla/websocket"
 	"go.uber.org/zap"
 )
@@ -21,13 +22,13 @@ var upgrader = websocket.Upgrader{
 }
 
 type WSHandler struct {
-	hub       *ws.Hub
-	jwtSecret []byte
-	logger    *zap.Logger
+	hub     *ws.Hub
+	keyFunc jwt.Keyfunc
+	logger  *zap.Logger
 }
 
-func NewWSHandler(hub *ws.Hub, jwtSecret []byte, logger *zap.Logger) *WSHandler {
-	return &WSHandler{hub: hub, jwtSecret: jwtSecret, logger: logger}
+func NewWSHandler(hub *ws.Hub, keyFunc jwt.Keyfunc, logger *zap.Logger) *WSHandler {
+	return &WSHandler{hub: hub, keyFunc: keyFunc, logger: logger}
 }
 
 // HandleScanStatus upgrades to WebSocket and subscribes the client to a scan's events.
@@ -45,7 +46,7 @@ func (h *WSHandler) HandleScanStatus(c *gin.Context) {
 		return
 	}
 
-	claims, err := auth.ParseSupabaseToken(token, h.jwtSecret)
+	claims, err := auth.ParseSupabaseTokenWithKeyFunc(token, h.keyFunc)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid token: " + err.Error()})
 		return
