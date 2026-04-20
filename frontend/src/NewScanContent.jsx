@@ -117,6 +117,7 @@ export default function NewScanContent() {
 
       let status = created.status;
       let message = 'Scan created.';
+      let startFailed = false;
 
       if (autoStart) {
         try {
@@ -124,12 +125,13 @@ export default function NewScanContent() {
           status = started.status;
           message = started.message || 'Scan created and start requested.';
         } catch (startErr) {
+          startFailed = true;
           setError(`Scan created (ID: ${created.id}) but failed to start: ${startErr.message}. You can retry from the Monitor.`);
         }
       }
 
       setCreatedScan({ ...created, status });
-      if (!autoStart || !error) setInfo(message);
+      if (!startFailed) setInfo(message);
     } catch (err) {
       setError(err.message || 'Failed to create scan.');
     } finally {
