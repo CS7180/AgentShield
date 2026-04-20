@@ -1,5 +1,6 @@
 import React from 'react'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { MemoryRouter } from 'react-router-dom'
 import NewScanContent from './NewScanContent'
 
 const mockUseAuth = vi.fn()
@@ -26,7 +27,7 @@ describe('NewScanContent', () => {
   })
 
   it('blocks invalid URLs before hitting the API', async () => {
-    render(<NewScanContent />)
+    render(<MemoryRouter><NewScanContent /></MemoryRouter>)
 
     fireEvent.click(screen.getByRole('button', { name: /create \+ start scan/i }))
 
@@ -48,7 +49,7 @@ describe('NewScanContent', () => {
       message: 'started',
     })
 
-    render(<NewScanContent />)
+    render(<MemoryRouter><NewScanContent /></MemoryRouter>)
 
     fireEvent.change(screen.getByPlaceholderText('https://example.com/v1/chat'), {
       target: { value: 'https://example.com' },
@@ -70,7 +71,7 @@ describe('NewScanContent', () => {
       status: 'pending',
     })
 
-    render(<NewScanContent />)
+    render(<MemoryRouter><NewScanContent /></MemoryRouter>)
 
     fireEvent.change(screen.getByPlaceholderText('https://example.com/v1/chat'), {
       target: { value: 'https://example.com' },
