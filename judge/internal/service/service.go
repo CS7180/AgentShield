@@ -256,7 +256,11 @@ func decideConfidence(input JudgeInput) float64 {
 	if input.AttackSuccess {
 		base = 0.70
 	}
-	return base + bucket
+	c := base + bucket
+	if c > 1.0 {
+		c = 1.0
+	}
+	return c
 }
 
 func writeJSON(w http.ResponseWriter, statusCode int, payload any) {

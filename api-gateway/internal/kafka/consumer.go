@@ -2,6 +2,7 @@ package kafka
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/IBM/sarama"
@@ -42,6 +43,9 @@ func (cg *ConsumerGroup) Run(ctx context.Context) {
 	for {
 		if err := cg.client.Consume(ctx, watchedTopics, handler); err != nil {
 			if ctx.Err() != nil {
+				return
+			}
+			if errors.Is(err, sarama.ErrClosedConsumerGroup) {
 				return
 			}
 			cg.logger.Error("kafka consume error", zap.Error(err))
