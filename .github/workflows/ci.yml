@@ -141,37 +141,3 @@ jobs:
           name: playwright-report
           path: frontend/playwright-report/
           retention-days: 7
-
-  ai-pr-review:
-    name: AI PR Review (Claude)
-    runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
-    permissions:
-      contents: read
-      pull-requests: write
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Claude Code Review
-        uses: anthropics/claude-code-action@beta
-        with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          direct_prompt: |
-            Review this pull request for AgentShield, a multi-agent LLM security testing platform.
-
-            Apply the C.L.E.A.R. framework in your review:
-            - **Context**: Does the PR description explain the problem and approach?
-            - **Logic**: Is the implementation approach sound? Are there better alternatives?
-            - **Effort**: Is scope appropriate — not over-engineered or under-built?
-            - **Assumptions**: What assumptions are baked in? Are they valid?
-            - **Results**: Are the changes testable and well-tested?
-
-            Also check:
-            1. Security (OWASP LLM Top 10, SSRF, auth/ownership, secrets)
-            2. Test coverage — are new code paths tested?
-            3. Consistency with project conventions (docs/claude/conventions.md)
-            4. Frontend: React patterns, no direct fetch() calls outside src/api/client.js
-            5. Go: error wrapping, context propagation, no naked panics
-
-            Be specific and actionable. Flag blocking issues clearly.
