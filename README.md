@@ -21,26 +21,35 @@ The planned output is an OWASP LLM Top 10-aligned report available in both JSON 
 
 ## Architecture
 
-At the product level, AgentShield is designed around the following flow:
+```mermaid
+flowchart TD
+    FE["React Dashboard\n(Vite + React Router)"]
+    SA["Supabase Auth\n(Google OAuth)"]
+    GW["Go API Gateway\nJWT · rate limit · SSRF guard · Prometheus"]
+    OR["Go Orchestrator\ntask scheduling · agent lifecycle"]
+    RT["Red Team Agents\nPython + CrewAI\nPrompt Injection · Jailbreak\nData Leakage · Constraint Drift"]
+    BT["Blue Team Agents\nPython + CrewAI\nInput Guard · Output Filter\nBehavior Monitor · Constraint Persistence"]
+    JD["LLM-as-Judge\nPython · Gemini 2.5 Pro"]
+    KF[("Kafka\nattack.results\ndefense.results\njudge.evaluations\nagent.status")]
+    AG["Result Aggregator\nReport Generator\nOWASP LLM Top 10 · JSON + PDF"]
+    DB[("PostgreSQL\nSupabase")]
+    RD[("Redis\ncache · rate limit")]
 
-```text
-React Dashboard
-      |
-      v
-Go API Gateway
-      |
-      v
-Go Orchestrator
-      |
-      +--> Red Team Agents (Python / CrewAI)
-      +--> Blue Team Agents (Python / CrewAI)
-      +--> LLM-as-Judge
-      |
-      v
-Kafka -> Result Aggregation -> Report Generation
-      |
-      v
-PostgreSQL + Redis
+    FE -- "JWT Bearer" --> GW
+    FE -- "OAuth" --> SA
+    SA -- "session token" --> FE
+    GW -- "gRPC" --> OR
+    GW -- "WebSocket\n?token=jwt" --> FE
+    OR -- "gRPC tasks" --> RT
+    OR -- "gRPC tasks" --> BT
+    OR -- "gRPC tasks" --> JD
+    RT -- "publish" --> KF
+    BT -- "publish" --> KF
+    JD -- "publish" --> KF
+    KF -- "consume" --> AG
+    AG --> DB
+    GW --> RD
+    AG --> GW
 ```
 
 The current repository state is earlier than that full target architecture:
