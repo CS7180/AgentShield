@@ -57,11 +57,16 @@ export default defineConfig({
     // local dev these stubs only take effect when .env.local is absent.
     // In CI (no .env.local) they ensure isSupabaseConfigured === true.
     env: {
+      // Use || (not ??) so that empty strings passed by GitHub Actions for
+      // unset secrets also fall back to the placeholder values.
+      // GitHub Actions substitutes "" for ${{ secrets.UNSET_SECRET }}, which
+      // is falsy but not nullish — ?? would let the empty string through,
+      // leaving isSupabaseConfigured=false and breaking auth-dependent tests.
       VITE_SUPABASE_URL:
-        process.env.VITE_SUPABASE_URL ?? 'https://placeholder.supabase.co',
+        process.env.VITE_SUPABASE_URL || 'https://placeholder.supabase.co',
       VITE_SUPABASE_ANON_KEY:
-        process.env.VITE_SUPABASE_ANON_KEY ?? 'placeholder-anon-key',
-      VITE_API_URL: process.env.VITE_API_URL ?? 'http://localhost:8080',
+        process.env.VITE_SUPABASE_ANON_KEY || 'placeholder-anon-key',
+      VITE_API_URL: process.env.VITE_API_URL || 'http://localhost:8080',
     },
   },
 });
