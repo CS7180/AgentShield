@@ -248,3 +248,6 @@ The PRD targets a broader multi-service platform with:
 - `project_memory/` is a reference area and should be treated as read-only
 - the current repo is an implementation slice of the full platform, not the entire product described in the PRD
 - if you are using Supabase for a long-running backend service, choose the database connection mode intentionally instead of treating the example `DATABASE_URL` as production-ready verbatim text
+
+## Links
+Medium Post: https://medium.com/p/d37fa800f506?postPublishedType=initial
