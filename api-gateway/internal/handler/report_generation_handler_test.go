@@ -143,3 +143,79 @@ func TestReportGenerate_Returns100Score_WhenNoResults(t *testing.T) {
 		t.Fatalf("overall_score = %v, want 100", score)
 	}
 }
+
+func TestReportGenerate_WithPDF_Returns200_AndUploadsTwice(t *testing.T) {
+	scanID := uuid.New()
+	userID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+
+	reportRepo := &fakeReportRepo{}
+	// Two *successful* results with different severities so sort.Slice in
+	// buildGeneratedReportPayload actually invokes the severityRank comparator.
+	attackRepo := &fakeAttackResultRepo{
+		listResults: []*domain.AttackResult{
+			{
+				ID:             uuid.New(),
+				ScanID:         scanID,
+				UserID:         userID,
+				AttackType:     "prompt_injection",
+				AttackPrompt:   "ignore policy (test)",
+				TargetResponse: "sure",
+				AttackSuccess:  true,
+				Severity:       "high",
+			},
+			{
+				ID:             uuid.New(),
+				ScanID:         scanID,
+				UserID:         userID,
+				AttackType:     "jailbreak",
+				AttackPrompt:   "bypass (test)",
+				TargetResponse: "yes",
+				AttackSuccess:  true,
+				Severity:       "critical",
+			},
+			{
+				ID:             uuid.New(),
+				ScanID:         scanID,
+				UserID:         userID,
+				AttackType:     "data_leakage",
+				AttackPrompt:   "dump secrets",
+				TargetResponse: "blocked",
+				AttackSuccess:  false,
+				Severity:       "medium",
+			},
+		},
+	}
+	scanRepo := &fakeGenerateScanRepo{
+		scan: &domain.Scan{
+			ID:             scanID,
+			UserID:         userID,
+			TargetEndpoint: "https://example.com/chat",
+			Mode:           domain.ModeRedTeam,
+		},
+	}
+	uploader := &fakeUploader{}
+
+	h := handler.NewReportGenerationHandler(
+		reportRepo,
+		attackRepo,
+		scanRepo,
+		uploader,
+		"agentshield-reports",
+		zap.NewNop(),
+	)
+	r := newReportGenerateRouter(h)
+
+	// include_pdf: true triggers severityRank, renderSimpleReportPDF,
+	// buildSinglePagePDF and escapePDFText
+	body := []byte(`{"include_pdf": true}`)
+	req := httptest.NewRequest(http.MethodPost, "/scans/"+scanID.String()+"/report/generate", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assertStatus(t, w, http.StatusOK)
+	// JSON upload + PDF upload = 2
+	if uploader.uploads != 2 {
+		t.Errorf("uploads = %d, want 2 (json + pdf)", uploader.uploads)
+	}
+}

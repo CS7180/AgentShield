@@ -3,6 +3,7 @@ package handler_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -146,4 +147,56 @@ func TestAttackResultsList_Returns200(t *testing.T) {
 	r.ServeHTTP(w, req)
 
 	assertStatus(t, w, http.StatusOK)
+}
+
+func TestAttackResultsCreateBatch_Returns400_WithInvalidScanID(t *testing.T) {
+	repo := &fakeAttackResultRepo{}
+	h := handler.NewAttackResultHandler(repo, zap.NewNop())
+	r := newAttackResultsRouter(h)
+
+	body := []byte(`{"results":[{"attack_type":"prompt_injection","attack_prompt":"x","target_response":"y","attack_success":true,"severity":"high"}]}`)
+	req := httptest.NewRequest(http.MethodPost, "/scans/not-a-uuid/attack-results", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assertStatus(t, w, http.StatusBadRequest)
+}
+
+func TestAttackResultsCreateBatch_Returns500_OnRepoError(t *testing.T) {
+	repo := &fakeAttackResultRepo{createErr: errors.New("db down")}
+	h := handler.NewAttackResultHandler(repo, zap.NewNop())
+	r := newAttackResultsRouter(h)
+
+	body := []byte(`{"results":[{"attack_type":"prompt_injection","attack_prompt":"x","target_response":"y","attack_success":true,"severity":"high"}]}`)
+	req := httptest.NewRequest(http.MethodPost, "/scans/"+uuid.New().String()+"/attack-results", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assertStatus(t, w, http.StatusInternalServerError)
+}
+
+func TestAttackResultsList_Returns400_WithInvalidScanID(t *testing.T) {
+	repo := &fakeAttackResultRepo{}
+	h := handler.NewAttackResultHandler(repo, zap.NewNop())
+	r := newAttackResultsRouter(h)
+
+	req := httptest.NewRequest(http.MethodGet, "/scans/not-a-uuid/attack-results", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assertStatus(t, w, http.StatusBadRequest)
+}
+
+func TestAttackResultsList_Returns500_OnRepoError(t *testing.T) {
+	repo := &fakeAttackResultRepo{listErr: errors.New("db down")}
+	h := handler.NewAttackResultHandler(repo, zap.NewNop())
+	r := newAttackResultsRouter(h)
+
+	req := httptest.NewRequest(http.MethodGet, "/scans/"+uuid.New().String()+"/attack-results", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assertStatus(t, w, http.StatusInternalServerError)
 }

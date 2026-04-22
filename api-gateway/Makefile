@@ -27,10 +27,20 @@ coverage:
 	go test ./... -coverprofile=coverage.out
 	go tool cover -func=coverage.out | tail -n 1
 
-# Baseline quality gate (override with `COVERAGE_MIN=<n>` in CI/local).
+# Coverage gate: measures only pure-logic packages that don't require
+# external infrastructure (postgres/redis/kafka/storage/orchestrator).
+# Override the threshold with `COVERAGE_MIN=<n>` (default: 70).
+TESTABLE_PKGS := \
+	./internal/auth/... \
+	./internal/domain/... \
+	./internal/handler/... \
+	./internal/middleware/... \
+	./internal/validation/... \
+	./internal/ws/...
+
 coverage-check:
-	@min=$${COVERAGE_MIN:-25}; \
-	go test ./... -coverprofile=coverage.out >/tmp/agentshield_apigw_cover.log; \
+	@min=$${COVERAGE_MIN:-70}; \
+	go test $(TESTABLE_PKGS) -coverprofile=coverage.out >/tmp/agentshield_apigw_cover.log 2>&1; \
 	total=$$(go tool cover -func=coverage.out | awk '/^total:/{gsub("%","",$$3); print $$3}'); \
 	echo "Total coverage: $${total}% (required: $${min}%)"; \
 	awk "BEGIN { exit !($${total} >= $${min}) }" || (echo "coverage gate failed"; rm -f coverage.out; exit 1); \

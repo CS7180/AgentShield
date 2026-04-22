@@ -45,7 +45,7 @@ jobs:
         run: go test ./...
 
       - name: Coverage Gate
-        run: make coverage-check COVERAGE_MIN=25
+        run: make coverage-check
 
   backend-services:
     name: Orchestrator/Agents/Judge Tests
