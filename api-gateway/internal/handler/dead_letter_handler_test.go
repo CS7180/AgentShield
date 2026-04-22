@@ -3,6 +3,7 @@ package handler_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -85,5 +86,46 @@ func TestDeadLetterList_Returns400_WhenInvalidScanID(t *testing.T) {
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400 (body: %s)", w.Code, w.Body.String())
+	}
+}
+
+func TestDeadLetterList_Returns400_WhenInvalidUserID(t *testing.T) {
+	h := handler.NewDeadLetterHandler(&fakeDeadLetterRepo{}, zap.NewNop())
+	r := newDeadLetterRouter(h, "not-a-uuid")
+
+	req := httptest.NewRequest(http.MethodGet, "/scans/"+uuid.New().String()+"/dead-letters", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 (body: %s)", w.Code, w.Body.String())
+	}
+}
+
+func TestDeadLetterList_Returns500_OnRepoError(t *testing.T) {
+	repo := &fakeDeadLetterRepo{err: errors.New("db error")}
+	h := handler.NewDeadLetterHandler(repo, zap.NewNop())
+	r := newDeadLetterRouter(h, uuid.New().String())
+
+	req := httptest.NewRequest(http.MethodGet, "/scans/"+uuid.New().String()+"/dead-letters", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500 (body: %s)", w.Code, w.Body.String())
+	}
+}
+
+func TestDeadLetterList_Returns200_WithLimitOffsetParams(t *testing.T) {
+	repo := &fakeDeadLetterRepo{items: []*domain.ScanDeadLetter{}, total: 0}
+	h := handler.NewDeadLetterHandler(repo, zap.NewNop())
+	r := newDeadLetterRouter(h, uuid.New().String())
+
+	req := httptest.NewRequest(http.MethodGet, "/scans/"+uuid.New().String()+"/dead-letters?limit=5&offset=10", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body: %s)", w.Code, w.Body.String())
 	}
 }
