@@ -57,5 +57,30 @@
     "Bash(which *)",
     "Bash(go version)",
     "Bash(go env)"
-  ]
+  ],
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -c 'fp=$(python3 -c \"import os,json; print(json.loads(os.environ.get(\\\"CLAUDE_TOOL_INPUT\\\",\\\"{}\\\")).get(\\\"file_path\\\",\\\"\\\"))\" 2>/dev/null); if [[ \"$fp\" =~ /frontend/.*\\.jsx?$ ]]; then root=$(git -C \"$(dirname \"$fp\")\" rev-parse --show-toplevel 2>/dev/null); [[ -n \"$root\" ]] && cd \"$root/frontend\" && npm run lint --silent 2>&1 | head -20; fi'",
+            "timeout": 15000
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -c 'root=$(git rev-parse --show-toplevel 2>/dev/null) && [[ -d \"$root/frontend\" ]] && cd \"$root/frontend\" && npm test 2>&1 | tail -8 || true'",
+            "timeout": 60000
+          }
+        ]
+      }
+    ]
+  }
 }

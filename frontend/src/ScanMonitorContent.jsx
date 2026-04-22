@@ -130,6 +130,9 @@ export default function ScanMonitorContent() {
       cancelled = true;
       clearInterval(timer);
     };
+    // selectedScanID intentionally omitted: including it would re-run this
+    // effect every time auto-selection sets a new ID, causing an infinite loop.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
   useEffect(() => {
